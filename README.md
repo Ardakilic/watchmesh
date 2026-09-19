@@ -2,6 +2,8 @@
 
 1 source → N targets watch-history sync. Trakt/Simkl/Ryot/Yamtrack fan out per sync; Postgres holds cursors + per-target seen hashes so reruns only push what's missing.
 
+New here? Start with [QUICKSTART.md](QUICKSTART.md) — Trakt → Simkl + self-hosted Ryot/Yamtrack, Docker or binary.
+
 ## How it works
 
 ```mermaid
