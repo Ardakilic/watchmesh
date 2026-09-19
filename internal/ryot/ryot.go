@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +103,47 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 	return delivered, nil
 }
 
+// doWithRetry runs build once, and on 429 waits Retry-After once then retries once.
+func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Request, error)) (*http.Response, error) {
+	req, err := build()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusTooManyRequests {
+		return resp, nil
+	}
+	secs := 1
+	if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
+		if n, err := strconv.Atoi(ra); err == nil && n >= 0 {
+			secs = n
+		} else if t, err := http.ParseTime(ra); err == nil {
+			// ponytail: HTTP-date form; past dates fall to 0 (immediate retry)
+			if d := time.Until(t); d > 0 {
+				secs = int(d/time.Second) + 1
+			} else {
+				secs = 0
+			}
+		}
+	}
+	resp.Body.Close()
+	if secs > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(secs) * time.Second):
+		}
+	}
+	req2, err := build()
+	if err != nil {
+		return nil, err
+	}
+	return hc.Do(req2)
+}
+
 // pushOne POSTs one updateSeenHistory mutation for mid.
 func (c *Client) pushOne(ctx context.Context, it model.WatchItem, mid string) error {
 	body, _ := json.Marshal(gqlReq{
@@ -112,13 +154,15 @@ func (c *Client) pushOne(ctx context.Context, it model.WatchItem, mid string) er
 			"finishedOn": finishedOn(it),
 		}},
 	})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/backend/graphql", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	resp, err := c.httpClient().Do(req)
+	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/backend/graphql", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		return req, nil
+	})
 	if err != nil {
 		return err
 	}
