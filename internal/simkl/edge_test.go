@@ -478,6 +478,39 @@ func TestFetchIncludesWatchingBucket(t *testing.T) {
 	}
 }
 
+// TestFetchDedupesAcrossBuckets verifies the same episode in completed+watching
+// buckets emits once.
+func TestFetchDedupesAcrossBuckets(t *testing.T) {
+	ctx := context.Background()
+	ep := `{"status":"completed","last_watched_at":"2026-05-13T19:00:00Z","show":{"title":"S","year":2010,"ids":{"simkl":1411674}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-05-13T19:00:00Z"}]}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"shows":[%s]}`, ep)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "c", "t").fetchCategory(ctx, "shows", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got=%d want 1 (same episode in both buckets emits once)", len(got))
+	}
+	if got[0].Season != 1 || got[0].Episode != 1 || got[0].IDs.Simkl != 1411674 || got[0].WatchedAt.IsZero() {
+		t.Fatalf("got=%+v", got[0])
+	}
+	// Same movie in both buckets emits once (covers the movies dedupe branch).
+	mov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"movies":[{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"M","year":2007,"ids":{"simkl":1015859}}}]}`)
+	}))
+	defer mov.Close()
+	mgot, err := New(mov.URL, "c", "t").fetchCategory(ctx, "movies", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mgot) != 1 {
+		t.Fatalf("got=%d want 1 (same movie in both buckets emits once)", len(mgot))
+	}
+}
+
 // TestHistorySkipsUnchangedTVShows verifies an unchanged tv_shows cursor skips
 // all-items fetches for shows while dirty movies still fetch.
 func TestHistorySkipsUnchangedTVShows(t *testing.T) {

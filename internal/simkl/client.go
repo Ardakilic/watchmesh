@@ -220,9 +220,11 @@ func toIDs(s simklIDs) model.IDs {
 // actually-watched entries: movies with non-empty last_watched_at,
 // episodes with non-empty episode watched_at. Everything else
 // (plan-to-watch, dropped, never-watched, zero timestamps) is dropped.
-// Entries older than since are filtered.
+// Entries older than since are filtered. Entries appearing in both
+// buckets emit once (cross-bucket dedupe by Hash).
 func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
+	seen := map[string]struct{}{}
 	for _, bucket := range []string{"completed", "watching"} {
 		u := c.BaseURL + "/sync/all-items/" + cat + "/" + bucket + "?extended=full&episode_watched_at=yes&include_all_episodes=original"
 		if !since.IsZero() {
@@ -258,10 +260,16 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 					continue
 				}
 				m := e.Movie
-				out = append(out, model.WatchItem{
+				it := model.WatchItem{
 					IDs: toIDs(m.IDs), MediaType: "movie",
 					Title: m.Title, Year: m.Year, WatchedAt: at,
-				})
+				}
+				h := it.Hash()
+				if _, dup := seen[h]; dup {
+					continue
+				}
+				seen[h] = struct{}{}
+				out = append(out, it)
 			}
 			continue
 		}
@@ -276,11 +284,17 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 					if at.IsZero() || (!since.IsZero() && at.Before(since)) {
 						continue
 					}
-					out = append(out, model.WatchItem{
+					it := model.WatchItem{
 						IDs: toIDs(s.IDs), MediaType: "episode",
 						Title: s.Title, Year: s.Year,
 						Season: sn.Number, Episode: ep.Number, WatchedAt: at,
-					})
+					}
+					h := it.Hash()
+					if _, dup := seen[h]; dup {
+						continue
+					}
+					seen[h] = struct{}{}
+					out = append(out, it)
 				}
 			}
 		}
