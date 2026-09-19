@@ -31,7 +31,7 @@ func TestHistorySkipsWhenUnchanged(t *testing.T) {
 		n++
 		checkHeaders(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-10T20:00:00Z"},"tv_shows":{"watched_at":"2026-05-10T20:00:00Z"},"anime":{"watched_at":"2026-05-10T20:00:00Z"}}`)
+		fmt.Fprint(w, `{"all":"2026-05-10T20:00:00Z","movies":{"all":"2026-05-10T20:00:00Z"},"tv_shows":{"all":"2026-05-10T20:00:00Z"},"anime":{"all":"2026-05-10T20:00:00Z"}}`)
 	}))
 	defer srv.Close()
 	since := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
@@ -55,7 +55,7 @@ func TestHistoryFetchesWhenNewer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/sync/activities":
-			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"tv_shows":{"watched_at":"2026-05-13T19:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
+			fmt.Fprint(w, `{"all":"2026-05-15T22:30:00Z","movies":{"all":"2026-05-15T22:30:00Z"},"tv_shows":{"all":"2026-05-13T19:00:00Z","watching":"2026-05-13T19:00:00Z","completed":"2026-05-12T00:00:00Z"},"anime":{"all":"2026-05-01T00:00:00Z"}}`)
 		case strings.HasPrefix(r.URL.Path, "/sync/all-items/movies/"):
 			checkExtended(t, r)
 			if r.URL.Query().Get("date_from") == "" {

@@ -204,7 +204,7 @@ func TestActivitiesTransportErrors(t *testing.T) {
 func TestHistoryFetchError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/sync/activities" {
-			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"tv_shows":{"watched_at":"2026-05-01T00:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
+			fmt.Fprint(w, `{"all":"2026-05-15T22:30:00Z","movies":{"all":"2026-05-15T22:30:00Z"},"tv_shows":{"all":"2026-05-01T00:00:00Z"},"anime":{"all":"2026-05-01T00:00:00Z"}}`)
 			return
 		}
 		w.WriteHeader(500)
@@ -486,7 +486,7 @@ func TestHistorySkipsUnchangedTVShows(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/sync/activities":
-			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"tv_shows":{"watched_at":"2026-05-01T00:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
+			fmt.Fprint(w, `{"all":"2026-05-15T22:30:00Z","movies":{"all":"2026-05-15T22:30:00Z"},"tv_shows":{"all":"2026-05-01T00:00:00Z"},"anime":{"all":"2026-05-01T00:00:00Z"}}`)
 		case strings.Contains(r.URL.Path, "/movies/"):
 			moviesHits++
 			fmt.Fprint(w, `{"movies":[]}`)

@@ -122,9 +122,26 @@ func parseTime(s string) time.Time {
 	return time.Time{}
 }
 
-// activityCursor is the per-category dirty-check timestamp from /sync/activities.
+// activityCursor is the per-category dirty-check cursor from /sync/activities.
+// Each category value is an object with an "all" timestamp; non-object
+// entries (e.g. the top-level "all" string) decode to the zero cursor.
 type activityCursor struct {
-	WatchedAt string `json:"watched_at"`
+	All string `json:"all"`
+}
+
+// UnmarshalJSON decodes category objects and tolerates top-level string
+// entries as the zero cursor so real /sync/activities responses parse.
+func (a *activityCursor) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || b[0] == '"' {
+		return nil
+	}
+	type raw activityCursor
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	*a = activityCursor(r)
+	return nil
 }
 
 // activities GETs /sync/activities for the per-category dirty-check cursors.
@@ -296,7 +313,7 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 		{"movies", "movies"}, {"shows", "tv_shows"}, {"anime", "anime"},
 	} {
 		if !since.IsZero() {
-			if t := parseTime(acts[cc.actKey].WatchedAt); !t.IsZero() && !t.After(since) {
+			if t := parseTime(acts[cc.actKey].All); !t.IsZero() && !t.After(since) {
 				continue
 			}
 		}
