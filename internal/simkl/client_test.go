@@ -13,6 +13,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// checkHeaders asserts the Simkl API key and Bearer headers.
 func checkHeaders(t *testing.T, r *http.Request) {
 	t.Helper()
 	if r.Header.Get("simkl-api-key") != "cid" {
@@ -23,6 +24,7 @@ func checkHeaders(t *testing.T, r *http.Request) {
 	}
 }
 
+// TestHistorySkipsWhenUnchanged verifies no all-items fetch when cursors are old.
 func TestHistorySkipsWhenUnchanged(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +47,7 @@ func TestHistorySkipsWhenUnchanged(t *testing.T) {
 	}
 }
 
+// TestHistoryFetchesWhenNewer verifies dirty categories fetch with date_from.
 func TestHistoryFetchesWhenNewer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		checkHeaders(t, r)
@@ -91,6 +94,7 @@ func TestHistoryFetchesWhenNewer(t *testing.T) {
 	}
 }
 
+// TestHistoryError verifies 401/500/malformed activities responses fail.
 func TestHistoryError(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -114,6 +118,7 @@ func TestHistoryError(t *testing.T) {
 	}
 }
 
+// TestPush verifies POST /sync/history movie/show shape and error statuses.
 func TestPush(t *testing.T) {
 	tests := []struct {
 		name    string

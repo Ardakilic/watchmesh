@@ -25,6 +25,7 @@ type Client struct {
 	HTTP    *http.Client // nil => http.DefaultClient
 }
 
+// New builds a Client for a Ryot base URL and Bearer token.
 func New(baseURL, token string) *Client {
 	return &Client{BaseURL: strings.TrimSuffix(strings.TrimSpace(baseURL), "/"), Token: token}
 }
@@ -32,6 +33,7 @@ func New(baseURL, token string) *Client {
 // Name implements model.Target/model.Source.
 func (c *Client) Name() string { return "ryot" }
 
+// httpClient returns the injected client, or http.DefaultClient when nil.
 func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
@@ -57,6 +59,7 @@ func metadataID(w model.WatchItem) (id string, ok bool) {
 	return fmt.Sprintf("tmdb://%s/%d", kind, w.IDs.TMDB), true
 }
 
+// finishedOn formats WatchedAt for the mutation; zero time becomes now.
 func finishedOn(w model.WatchItem) string {
 	t := w.WatchedAt
 	if t.IsZero() {
@@ -65,11 +68,13 @@ func finishedOn(w model.WatchItem) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+// gqlReq is a GraphQL request body with query and variables.
 type gqlReq struct {
 	Query     string         `json:"query"`
 	Variables map[string]any `json:"variables,omitempty"`
 }
 
+// gqlResp is a GraphQL response body; non-empty Errors means failure.
 type gqlResp struct {
 	Data   json.RawMessage `json:"data"`
 	Errors []struct {
@@ -93,6 +98,7 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 	return nil
 }
 
+// pushOne POSTs one updateSeenHistory mutation for mid.
 func (c *Client) pushOne(ctx context.Context, it model.WatchItem, mid string) error {
 	body, _ := json.Marshal(gqlReq{
 		Query: "mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}",
@@ -135,12 +141,14 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 	return items, nil
 }
 
+// historyItem is one userMediaList element from the history query.
 type historyItem struct {
 	MetadataID string `json:"metadataId"`
 	FinishedOn string `json:"finishedOn"`
 	Title      string `json:"title"`
 }
 
+// history runs the userMediaList query and maps entries to WatchItems.
 func (c *Client) history(ctx context.Context, since time.Time) ([]model.WatchItem, error) {
 	body, _ := json.Marshal(gqlReq{Query: "query{userMediaList{metadataId finishedOn title}}"})
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/backend/graphql", bytes.NewReader(body))

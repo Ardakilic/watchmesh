@@ -9,9 +9,9 @@ connectors, dispatch `sync` / `serve` / `auth`. All logic in `internal/`:
 
 ## 2. Dependencies (Context7-verified)
 
-Go 1.24, stdlib: `net/http`, `encoding/json`, `flag`, `log/slog`,
+Go 1.27, stdlib: `net/http`, `encoding/json`, `flag`, `log/slog`,
 `time`, `testing` + `net/http/httptest`, `embed`, `os`. Two external deps:
-`github.com/jackc/pgx/v5/pgxpool` (queries) + `github.com/golang-migrate/migrate/v4`
+`github.com/jackc/pgx/v5 v5.11.0` (`pgxpool`, queries) + `github.com/golang-migrate/migrate/v4 v4.20.1`
 (`database/postgres` + `source/iofs` embed-first + `source/file` dev override).
 Context7 IDs used: `/golang/go`, `/docker/docs`, `/jackc/pgx`,
 `/golang-migrate/migrate`, plus Trakt/Simkl/Ryot/Yamtrack lookups (see nuances.md).
@@ -159,7 +159,7 @@ one GET. No inbound ports in v1. HTTP client: stdlib `net/http` with
 ## 8. Ops: image, compose, scheduling
 
 ```dockerfile
-FROM golang:1.24-bookworm AS build
+FROM golang:1.27.1-bookworm@sha256:6ed48491acfb40533f6970d9d8ce3cbfc6f2cc7d81413c2f01c871c927d98634 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -181,7 +181,7 @@ supercronic/cron daemon — extra process, harder log/shutdown story.
 ## 9. Makefile (docker-only)
 
 ```make
-GO := golang:1.24-bookworm
+GO := golang:1.27.1-bookworm
 RUN := docker run --rm -v $(PWD):/src -w /src $(GO)
 build: ; docker build -t watchmesh .
 dev: ; docker compose up --build
@@ -213,7 +213,7 @@ defer srv.Close()
 ## 11. Fresh-apply checklist
 
 1. Re-run Context7 `resolve`+`query` for Go/Docker/pgx/migrate + each watch API.
-2. Pin `golang:1.24.x` semver + distroless digest at apply time.
+2. Pin `golang:1.27.1-bookworm` + distroless digest at apply time.
 3. Introspect live Ryot GraphQL schema + Yamtrack webhook/views before
    finalizing those two connectors; keep them target-first.
 4. Verify Trakt rate limits live; keep 429 backoff everywhere.

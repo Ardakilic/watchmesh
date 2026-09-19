@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// pinResp is the /oauth/pin response with the user code.
 type pinResp struct {
 	UserCode        string `json:"user_code"`
 	VerificationURL string `json:"verification_url"`
@@ -18,6 +19,7 @@ type pinResp struct {
 	Interval        int    `json:"interval"`
 }
 
+// pinTokenResp is the /oauth/pin/{code} success response.
 type pinTokenResp struct {
 	AccessToken string `json:"access_token"`
 	Result      string `json:"result"`

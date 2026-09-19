@@ -13,6 +13,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// checkHeaders asserts the Trakt key, Bearer, and version headers.
 func checkHeaders(t *testing.T, r *http.Request) {
 	t.Helper()
 	if r.Header.Get("trakt-api-key") != "cid" {
@@ -26,6 +27,7 @@ func checkHeaders(t *testing.T, r *http.Request) {
 	}
 }
 
+// TestHistoryMoviesAndEpisodes verifies movie/episode mapping keeps IDs and WatchedAt.
 func TestHistoryMoviesAndEpisodes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		checkHeaders(t, r)
@@ -74,6 +76,7 @@ func TestHistoryMoviesAndEpisodes(t *testing.T) {
 	}
 }
 
+// TestHistoryPagination verifies paging concatenates pages until empty.
 func TestHistoryPagination(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -100,6 +103,7 @@ func TestHistoryPagination(t *testing.T) {
 	}
 }
 
+// TestHistoryError verifies 401/500/malformed history responses fail.
 func TestHistoryError(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -123,6 +127,7 @@ func TestHistoryError(t *testing.T) {
 	}
 }
 
+// TestPush verifies POST /sync/history shape, path, and error statuses.
 func TestPush(t *testing.T) {
 	tests := []struct {
 		name    string

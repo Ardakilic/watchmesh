@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// TestHashStable verifies identical items hash identically as 40-char sha1 hex.
 func TestHashStable(t *testing.T) {
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
 	a := WatchItem{IDs: IDs{Trakt: 1, IMDB: "tt1201607", TMDB: 603}, MediaType: "movie", WatchedAt: at}
@@ -17,6 +18,7 @@ func TestHashStable(t *testing.T) {
 	}
 }
 
+// TestHashDistinct verifies id, type, and time differences change the hash.
 func TestHashDistinct(t *testing.T) {
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
 	base := WatchItem{IDs: IDs{Trakt: 1}, MediaType: "movie", WatchedAt: at}

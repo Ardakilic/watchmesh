@@ -11,11 +11,13 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// item builds a movie WatchItem with a TMDB ID and fixed timestamp.
 func item(tmdb int) model.WatchItem {
 	return model.WatchItem{IDs: model.IDs{TMDB: tmdb}, MediaType: "movie",
 		Title: "T", WatchedAt: time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)}
 }
 
+// TestPush verifies the GraphQL path, Bearer auth, and error statuses.
 func TestPush(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -54,6 +56,7 @@ func TestPush(t *testing.T) {
 	}
 }
 
+// TestPushSkipsNoTMDB verifies TMDB==0 items send no requests.
 func TestPushSkipsNoTMDB(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +72,7 @@ func TestPushSkipsNoTMDB(t *testing.T) {
 	}
 }
 
+// TestHistoryErrorReturnsEmpty verifies read failures yield empty,nil, never errors.
 func TestHistoryErrorReturnsEmpty(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -96,6 +100,7 @@ func TestHistoryErrorReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestHistorySuccess verifies userMediaList maps to TMDB WatchItems.
 func TestHistorySuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"data":{"userMediaList":[{"metadataId":"tmdb://movie/603","finishedOn":"2026-05-10T20:00:00Z","title":"T"}]}}`)
@@ -107,6 +112,7 @@ func TestHistorySuccess(t *testing.T) {
 	}
 }
 
+// TestValidateToken verifies 200 passes and a bad token fails.
 func TestValidateToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/backend/config" {

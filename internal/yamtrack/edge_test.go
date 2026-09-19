@@ -12,6 +12,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// closedURL returns the URL of an already-closed server for transport errors.
 func closedURL(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -20,6 +21,7 @@ func closedURL(t *testing.T) string {
 	return url
 }
 
+// TestNameAndHTTPClient verifies Name and the nil/custom HTTP selection.
 func TestNameAndHTTPClient(t *testing.T) {
 	if New("http://x", "tok").Name() != "yamtrack" {
 		t.Fatal("Name must be yamtrack")
@@ -33,6 +35,7 @@ func TestNameAndHTTPClient(t *testing.T) {
 	}
 }
 
+// TestMediaKindUnknown verifies unknown types skip and episodes map to shows.
 func TestMediaKindUnknown(t *testing.T) {
 	if _, ok := mediaKind(model.WatchItem{MediaType: "podcast"}); ok {
 		t.Fatal("unknown type must skip")
@@ -42,12 +45,14 @@ func TestMediaKindUnknown(t *testing.T) {
 	}
 }
 
+// TestEndDateZero verifies zero WatchedAt becomes today's date.
 func TestEndDateZero(t *testing.T) {
 	if got := endDate(model.WatchItem{}); got != time.Now().UTC().Format("2006-01-02") {
 		t.Fatalf("got %q", got)
 	}
 }
 
+// TestPushSkipsUnknownKind verifies unmapped media types send no requests.
 func TestPushSkipsUnknownKind(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +69,7 @@ func TestPushSkipsUnknownKind(t *testing.T) {
 	}
 }
 
+// TestPushTransportErrors verifies request build/Do failures surface.
 func TestPushTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	it := []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
@@ -75,6 +81,7 @@ func TestPushTransportErrors(t *testing.T) {
 	}
 }
 
+// TestFromItemEdges verifies zero IDs fail and odd shapes normalize.
 func TestFromItemEdges(t *testing.T) {
 	if _, ok := fromItem(yamItem{}); ok {
 		t.Fatal("zero MediaID must fail")
@@ -85,6 +92,7 @@ func TestFromItemEdges(t *testing.T) {
 	}
 }
 
+// TestHistoryTransportErrors verifies request build/Do failures surface.
 func TestHistoryTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	if _, err := New("http://bad-\x7f-host", "t").History(ctx, time.Time{}); err == nil {
@@ -95,6 +103,7 @@ func TestHistoryTransportErrors(t *testing.T) {
 	}
 }
 
+// TestHistorySkipsZeroIDAndOld verifies zero IDs skip and since filters old.
 func TestHistorySkipsZeroIDAndOld(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/v1/media/movie/") {
@@ -118,6 +127,7 @@ func TestHistorySkipsZeroIDAndOld(t *testing.T) {
 	}
 }
 
+// TestValidateTokenTransportErrors verifies request build/Do failures surface.
 func TestValidateTokenTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	if err := New("http://bad-\x7f-host", "t").ValidateToken(ctx); err == nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// closedURL returns the URL of an already-closed server for transport errors.
 func closedURL(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -22,6 +23,7 @@ func closedURL(t *testing.T) string {
 	return url
 }
 
+// TestNameAndHTTPClient verifies Name and the nil/custom HTTP selection.
 func TestNameAndHTTPClient(t *testing.T) {
 	if New("http://x", "c", "s", "t").Name() != "trakt" {
 		t.Fatal("Name must be trakt")
@@ -35,6 +37,7 @@ func TestNameAndHTTPClient(t *testing.T) {
 	}
 }
 
+// TestNewDefaultBaseURL verifies empty base falls back and slashes trim.
 func TestNewDefaultBaseURL(t *testing.T) {
 	if got := New("", "c", "s", "t").BaseURL; got != DefaultBaseURL {
 		t.Fatalf("got %q", got)
@@ -44,6 +47,7 @@ func TestNewDefaultBaseURL(t *testing.T) {
 	}
 }
 
+// TestParseTimeZero verifies empty/unparseable timestamps yield zero time.
 func TestParseTimeZero(t *testing.T) {
 	if !parseTime("").IsZero() {
 		t.Fatal("empty must be zero")
@@ -53,6 +57,7 @@ func TestParseTimeZero(t *testing.T) {
 	}
 }
 
+// TestDoWithRetryEdges verifies build errors, passthrough, 429 retry, and cancel.
 func TestDoWithRetryEdges(t *testing.T) {
 	ctx := context.Background()
 	buildErr := errors.New("boom")
@@ -137,6 +142,7 @@ func TestDoWithRetryEdges(t *testing.T) {
 	}
 }
 
+// TestFetchKindEdges verifies transport failures, ID fallbacks, and bad bodies.
 func TestFetchKindEdges(t *testing.T) {
 	ctx := context.Background()
 	// Build error: control byte in base URL fails before any I/O.
@@ -207,6 +213,7 @@ func TestFetchKindEdges(t *testing.T) {
 	}
 }
 
+// TestPushEdges verifies zero WatchedAt skips and transport failures surface.
 func TestPushEdges(t *testing.T) {
 	ctx := context.Background()
 	// Zero WatchedAt is skipped, never stamped with a fabricated date.
@@ -235,6 +242,7 @@ func TestPushEdges(t *testing.T) {
 	}
 }
 
+// TestAuthEdges verifies device-flow transport, body, poll, and cancel errors.
 func TestAuthEdges(t *testing.T) {
 	ctx := context.Background()
 	bad := New("http://bad-\x7f-host", "c", "s", "")

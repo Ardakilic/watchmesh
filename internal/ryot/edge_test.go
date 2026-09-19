@@ -11,6 +11,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// closedURL returns the URL of an already-closed server for transport errors.
 func closedURL(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -19,6 +20,7 @@ func closedURL(t *testing.T) string {
 	return url
 }
 
+// TestNameAndHTTPClient verifies Name and the nil/custom HTTP selection.
 func TestNameAndHTTPClient(t *testing.T) {
 	if New("http://x", "tok").Name() != "ryot" {
 		t.Fatal("Name must be ryot")
@@ -32,6 +34,7 @@ func TestNameAndHTTPClient(t *testing.T) {
 	}
 }
 
+// TestMetadataIDKinds verifies movie/show mapping and episode/TMDB==0 skips.
 func TestMetadataIDKinds(t *testing.T) {
 	for _, tt := range []struct{ typ, want string }{
 		{"movie", "tmdb://movie/603"},
@@ -50,6 +53,7 @@ func TestMetadataIDKinds(t *testing.T) {
 	}
 }
 
+// TestFinishedOnZero verifies zero WatchedAt becomes ~now, set times pass through.
 func TestFinishedOnZero(t *testing.T) {
 	before := time.Now().UTC()
 	s := finishedOn(model.WatchItem{})
@@ -66,6 +70,7 @@ func TestFinishedOnZero(t *testing.T) {
 	}
 }
 
+// TestPushTransportErrors verifies request build/Do failures surface.
 func TestPushTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	it := []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
@@ -77,6 +82,7 @@ func TestPushTransportErrors(t *testing.T) {
 	}
 }
 
+// TestHistorySwallowsTransportErrors verifies transport failures yield empty,nil.
 func TestHistorySwallowsTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	for _, base := range []string{"http://bad-\x7f-host", closedURL(t)} {
@@ -87,6 +93,7 @@ func TestHistorySwallowsTransportErrors(t *testing.T) {
 	}
 }
 
+// TestHistorySkipsAndFilters verifies malformed IDs skip and since filters old.
 func TestHistorySkipsAndFilters(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"data":{"userMediaList":[
@@ -109,6 +116,7 @@ func TestHistorySkipsAndFilters(t *testing.T) {
 	}
 }
 
+// TestValidateTokenTransportErrors verifies request build/Do failures surface.
 func TestValidateTokenTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	if err := New("http://bad-\x7f-host", "t").ValidateToken(ctx); err == nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// pgURL returns the test database URL, skipping when PG is unavailable.
 func pgURL(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -25,6 +26,7 @@ func pgURL(t *testing.T) string {
 	return url
 }
 
+// TestMigrate verifies embedded migrations create both tables and rerun cleanly.
 func TestMigrate(t *testing.T) {
 	url := pgURL(t)
 	ctx := context.Background()
@@ -49,6 +51,7 @@ func TestMigrate(t *testing.T) {
 	}
 }
 
+// TestStoreRoundtrip verifies LastRun/MarkSeen/Seen/SetLastRun against PG.
 func TestStoreRoundtrip(t *testing.T) {
 	url := pgURL(t)
 	ctx := context.Background()
@@ -94,6 +97,7 @@ func TestStoreRoundtrip(t *testing.T) {
 	}
 }
 
+// TestStoreErrorPaths verifies bad migrations path, URL, and closed pool fail.
 func TestStoreErrorPaths(t *testing.T) {
 	url := pgURL(t)
 	ctx := context.Background()

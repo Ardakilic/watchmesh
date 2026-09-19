@@ -34,6 +34,7 @@ func New(baseURL, clientID, clientSecret, token string) *Client {
 // Name implements model Source/Target naming.
 func (c *Client) Name() string { return "trakt" }
 
+// httpClient returns the injected client, or http.DefaultClient when nil.
 func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
@@ -41,6 +42,7 @@ func (c *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
+// setHeaders sets Trakt auth, version, and JSON headers on r.
 func (c *Client) setHeaders(r *http.Request) {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
@@ -85,6 +87,7 @@ func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Reque
 	return hc.Do(req2)
 }
 
+// traktIDs is the Trakt ids object shared by movie/episode/show entries.
 type traktIDs struct {
 	Trakt int    `json:"trakt,omitempty"`
 	Slug  string `json:"slug,omitempty"`
@@ -93,6 +96,7 @@ type traktIDs struct {
 	TVDB  int    `json:"tvdb,omitempty"`
 }
 
+// movieEntry is one /sync/history/movies element.
 type movieEntry struct {
 	WatchedAt string `json:"watched_at"`
 	Movie     struct {
@@ -102,6 +106,7 @@ type movieEntry struct {
 	} `json:"movie"`
 }
 
+// episodeEntry is one /sync/history/episodes element with its show.
 type episodeEntry struct {
 	WatchedAt string `json:"watched_at"`
 	Episode   struct {
@@ -116,6 +121,7 @@ type episodeEntry struct {
 	} `json:"show"`
 }
 
+// parseTime parses Trakt timestamps; empty/unparseable yields zero time.
 func parseTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
@@ -128,6 +134,7 @@ func parseTime(s string) time.Time {
 	return time.Time{}
 }
 
+// fetchKind pages one history kind until an empty page (100-page cap).
 func (c *Client) fetchKind(ctx context.Context, kind string, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
 	// ponytail: page cap, raise if a library ever exceeds 10k history entries.
@@ -149,6 +156,7 @@ func (c *Client) fetchKind(ctx context.Context, kind string, since time.Time) ([
 	return out, nil
 }
 
+// fetchPage GETs one history page; empty reports a terminal empty page.
 func (c *Client) fetchPage(ctx context.Context, kind, u string) (entries []model.WatchItem, empty bool, err error) {
 	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
@@ -231,6 +239,7 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 	return append(movies, episodes...), nil
 }
 
+// pushIDs is the ids object in a /sync/history POST entry.
 type pushIDs struct {
 	Trakt int    `json:"trakt,omitempty"`
 	IMDB  string `json:"imdb,omitempty"`
@@ -238,11 +247,13 @@ type pushIDs struct {
 	TVDB  int    `json:"tvdb,omitempty"`
 }
 
+// pushEntry is one movies/episodes element in a /sync/history POST.
 type pushEntry struct {
 	WatchedAt string  `json:"watched_at"`
 	IDs       pushIDs `json:"ids"`
 }
 
+// pushID converts model IDs to the push payload ids shape.
 func pushID(ids model.IDs) pushIDs {
 	return pushIDs{Trakt: ids.Trakt, IMDB: ids.IMDB, TMDB: ids.TMDB, TVDB: ids.TVDB}
 }

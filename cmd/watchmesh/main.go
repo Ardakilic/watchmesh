@@ -20,6 +20,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/yamtrack"
 )
 
+// main is the watchmesh entrypoint; a run error becomes exit 1.
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "watchmesh:", err)
@@ -27,6 +28,7 @@ func main() {
 	}
 }
 
+// usage prints the subcommand summary to stderr.
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage: watchmesh <sync|serve|auth> [flags]")
 	fmt.Fprintln(os.Stderr, "  sync  --sync <name> (empty=all)")
@@ -34,6 +36,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  auth  --connection <name>")
 }
 
+// run dispatches sync|serve|auth; args excludes the program name.
 func run(args []string) error {
 	if len(args) == 0 {
 		usage()
@@ -72,6 +75,7 @@ func wire(c config.Connection) (engine.Source, engine.Target, error) {
 	}
 }
 
+// boot loads config, applies migrations, and opens the store.
 func boot(configPath, migrationsPath string) (*config.Config, *store.Store, error) {
 	cfg, err := config.Load(configPath, "", "")
 	if err != nil {
@@ -90,6 +94,7 @@ func boot(configPath, migrationsPath string) (*config.Config, *store.Store, erro
 	return cfg, st, nil
 }
 
+// runOne wires and syncs one named sync definition end to end.
 func runOne(ctx context.Context, cfg *config.Config, st *store.Store, name string) error {
 	var def *config.Sync
 	for i := range cfg.Syncs {
@@ -124,6 +129,7 @@ func runOne(ctx context.Context, cfg *config.Config, st *store.Store, name strin
 	return engine.Sync(ctx, def.Name, src, targets, st)
 }
 
+// runSync runs one (--sync) or all sync definitions once.
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	configPath := fs.String("config", "", "path to config file")
@@ -169,6 +175,7 @@ func runSync(args []string) error {
 	return nil
 }
 
+// runServe ticks runAll on cfg.Interval until SIGINT/SIGTERM.
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	configPath := fs.String("config", "", "path to config file")
@@ -209,6 +216,7 @@ func runServe(args []string) error {
 	}
 }
 
+// runAll runs every configured sync, logging per-sync failures.
 func runAll(ctx context.Context, cfg *config.Config, st *store.Store) {
 	for _, s := range cfg.Syncs {
 		select {
@@ -224,6 +232,7 @@ func runAll(ctx context.Context, cfg *config.Config, st *store.Store) {
 	}
 }
 
+// runAuth authenticates one --connection: device/PIN flow or token check.
 func runAuth(args []string) error {
 	fs := flag.NewFlagSet("auth", flag.ContinueOnError)
 	configPath := fs.String("config", "", "path to config file")

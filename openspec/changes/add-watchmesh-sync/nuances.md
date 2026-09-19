@@ -4,9 +4,9 @@ Tech decisions + uncertainties for fresh-context apply. Read with `design.md`.
 
 ## Decisions (ponytail: lazy, stdlib-first)
 
-- Go 1.24, builder `golang:1.24-bookworm` (pin semver e.g. 1.24.13). `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w"`.
+- Go 1.27 (builder `golang:1.27.1-bookworm` pinned by digest `sha256:6ed48491acfb40533f6970d9d8ce3cbfc6f2cc7d81413c2f01c871c927d98634). `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w"`.
 - Runtime `gcr.io/distroless/static-debian12:nonroot` (has ca-certs/tzdata, ~2MB). `base-debian12` only if cgo ever returns — it won't (pgx is pure Go).
-- Two external deps: `github.com/jackc/pgx/v5/pgxpool` (`pgxpool.New(ctx, DATABASE_URL)`) + `github.com/golang-migrate/migrate/v4` (postgres + iofs/file). Everything else stdlib: `net/http`, `encoding/json`, `flag.NewFlagSet`, `log/slog`, `time.NewTicker`, `testing`/`httptest`, `embed`, `os`.
+- Two external deps: `github.com/jackc/pgx/v5 v5.11.0` (`pgxpool.New(ctx, DATABASE_URL)`) + `github.com/golang-migrate/migrate/v4 v4.20.1` (postgres + iofs/file). Everything else stdlib: `net/http`, `encoding/json`, `flag.NewFlagSet`, `log/slog`, `time.NewTicker`, `testing`/`httptest`, `embed`, `os`.
 - Config JSON + env (`env:VAR` values), never YAML (would add `yaml.v3`). Precedence `flag>env>file>default`. Map form `connections: {name: {...}}` is canonical (design §4); array form rejected.
 - Scheduler = in-Go ticker + `signal.NotifyContext`, single PID 1. Rejected: supercronic sidecar (extra binary), host cron (fragile), K8s CronJob (overkill v1). Add supercronic only when exact cron expressions required.
 - DB 2 tables only: `sync_state`, `seen_items`. Hash = stable IDs + `watched_at`. No per-service tables.

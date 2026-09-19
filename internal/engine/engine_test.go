@@ -9,55 +9,66 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// fakeSource is a scripted Source returning canned items and error.
 type fakeSource struct {
 	items    []model.WatchItem
 	err      error
 	gotSince time.Time
 }
 
+// History records since and returns the scripted items and error.
 func (f *fakeSource) History(_ context.Context, since time.Time) ([]model.WatchItem, error) {
 	f.gotSince = since
 	return f.items, f.err
 }
 
+// fakeTarget records Push calls and returns a scripted error.
 type fakeTarget struct {
 	pushes [][]model.WatchItem
 	err    error
 }
 
+// Push records items and returns the scripted error.
 func (f *fakeTarget) Push(_ context.Context, items []model.WatchItem) error {
 	f.pushes = append(f.pushes, items)
 	return f.err
 }
 
+// memStore is an in-memory Store: cursor plus per-sync seen hashes.
 type memStore struct {
 	lastRun time.Time
 	setRuns int
 	seen    map[string]time.Time
 }
 
+// newMemStore returns an empty memStore.
 func newMemStore() *memStore { return &memStore{seen: map[string]time.Time{}} }
 
+// LastRun returns the in-memory cursor.
 func (m *memStore) LastRun(_ context.Context, _ string) (time.Time, error) {
 	return m.lastRun, nil
 }
 
+// Seen reports whether hash was recorded for sync.
 func (m *memStore) Seen(_ context.Context, sync, hash string) (bool, error) {
 	_, ok := m.seen[sync+"\x00"+hash]
 	return ok, nil
 }
 
+// MarkSeen records hash for sync.
 func (m *memStore) MarkSeen(_ context.Context, sync, hash string, watchedAt time.Time) error {
 	m.seen[sync+"\x00"+hash] = watchedAt
 	return nil
 }
 
+// SetLastRun advances the in-memory cursor and counts writes.
 func (m *memStore) SetLastRun(_ context.Context, _ string, t time.Time) error {
 	m.lastRun = t
 	m.setRuns++
 	return nil
 }
 
+// item builds a movie WatchItem with a Trakt ID and timestamp.
 func item(traktID int, at time.Time) model.WatchItem {
 	return model.WatchItem{
 		IDs:       model.IDs{Trakt: traktID},
@@ -67,6 +78,7 @@ func item(traktID int, at time.Time) model.WatchItem {
 	}
 }
 
+// TestSyncFansOut verifies every target gets all fresh items and state records.
 func TestSyncFansOut(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
@@ -87,6 +99,7 @@ func TestSyncFansOut(t *testing.T) {
 	}
 }
 
+// TestSyncDiffFiltersSeen verifies already-seen items are not pushed.
 func TestSyncDiffFiltersSeen(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
@@ -104,6 +117,7 @@ func TestSyncDiffFiltersSeen(t *testing.T) {
 	}
 }
 
+// TestSyncPartialFailure verifies one failing target neither blocks others nor state.
 func TestSyncPartialFailure(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
@@ -125,6 +139,7 @@ func TestSyncPartialFailure(t *testing.T) {
 	}
 }
 
+// TestSyncAllFailWritesNothing verifies total failure writes no state.
 func TestSyncAllFailWritesNothing(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSource{items: []model.WatchItem{item(1, time.Now())}}
@@ -139,6 +154,7 @@ func TestSyncAllFailWritesNothing(t *testing.T) {
 	}
 }
 
+// TestSyncEmptyWindow verifies an empty window pushes nothing and holds the cursor.
 func TestSyncEmptyWindow(t *testing.T) {
 	ctx := context.Background()
 	before := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
@@ -158,6 +174,7 @@ func TestSyncEmptyWindow(t *testing.T) {
 	}
 }
 
+// TestIdempotent verifies a rerun pushes nothing and holds the cursor.
 func TestIdempotent(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)

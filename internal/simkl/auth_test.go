@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestPINAuth verifies the PIN print→poll flow returns the token.
 func TestPINAuth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -42,6 +43,7 @@ func TestPINAuth(t *testing.T) {
 	}
 }
 
+// TestPINAuthError verifies 401/500 on the PIN step fail.
 func TestPINAuthError(t *testing.T) {
 	for _, status := range []int{401, 500} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +60,7 @@ func TestPINAuthError(t *testing.T) {
 	}
 }
 
+// TestPollPINPendingThenOK verifies pending polls retry until the token lands.
 func TestPollPINPendingThenOK(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

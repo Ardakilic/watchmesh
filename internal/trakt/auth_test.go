@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestDeviceAuth verifies the code→print→poll flow returns the token.
 func TestDeviceAuth(t *testing.T) {
 	var tokenHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +45,7 @@ func TestDeviceAuth(t *testing.T) {
 	}
 }
 
+// TestDeviceAuthCodeError verifies 401/500 on the code step fail.
 func TestDeviceAuthCodeError(t *testing.T) {
 	for _, status := range []int{401, 500} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +62,7 @@ func TestDeviceAuthCodeError(t *testing.T) {
 	}
 }
 
+// TestPollRespectsInterval verifies pending polls retry until the token lands.
 func TestPollRespectsInterval(t *testing.T) {
 	var n int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

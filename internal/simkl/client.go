@@ -38,6 +38,7 @@ func New(baseURL, clientID, token string) *Client {
 // Name implements model Source/Target naming.
 func (c *Client) Name() string { return "simkl" }
 
+// httpClient returns the injected client, or http.DefaultClient when nil.
 func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
@@ -45,6 +46,7 @@ func (c *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
+// setHeaders sets Simkl API key, Bearer, and JSON headers on r.
 func (c *Client) setHeaders(r *http.Request) {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
@@ -113,6 +115,7 @@ func (c *Client) throttlePOST() {
 	c.lastPOST = time.Now()
 }
 
+// parseTime parses Simkl timestamps; empty/unparseable yields zero time.
 func parseTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
@@ -125,10 +128,12 @@ func parseTime(s string) time.Time {
 	return time.Time{}
 }
 
+// activityCursor is the per-category dirty-check timestamp from /sync/activities.
 type activityCursor struct {
 	WatchedAt string `json:"watched_at"`
 }
 
+// activities GETs /sync/activities for the per-category dirty-check cursors.
 func (c *Client) activities(ctx context.Context) (map[string]activityCursor, error) {
 	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
 		c.throttleGET()
@@ -153,6 +158,7 @@ func (c *Client) activities(ctx context.Context) (map[string]activityCursor, err
 	return m, nil
 }
 
+// simklIDs is the Simkl ids object shared by movie/show/push items.
 type simklIDs struct {
 	Simkl int    `json:"simkl,omitempty"`
 	Slug  string `json:"slug,omitempty"`
@@ -161,6 +167,7 @@ type simklIDs struct {
 	TVDB  int    `json:"tvdb,omitempty"`
 }
 
+// movieItem is one movies element from /sync/all-items/movies.
 type movieItem struct {
 	Title       string   `json:"title"`
 	Year        int      `json:"year"`
@@ -169,6 +176,7 @@ type movieItem struct {
 	LastWatched string   `json:"last_watched_at"`
 }
 
+// showItem is one shows/anime element with seasons from /sync/all-items.
 type showItem struct {
 	Title   string   `json:"title"`
 	Year    int      `json:"year"`
@@ -182,10 +190,12 @@ type showItem struct {
 	} `json:"seasons"`
 }
 
+// toIDs converts Simkl ids to model IDs.
 func toIDs(s simklIDs) model.IDs {
 	return model.IDs{Simkl: s.Simkl, IMDB: s.IMDB, TMDB: s.TMDB, TVDB: s.TVDB}
 }
 
+// fetchCategory GETs /sync/all-items/{cat}, filtering entries older than since.
 func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
 	u := fmt.Sprintf("%s/sync/all-items/%s", c.BaseURL, cat)
 	if !since.IsZero() {
@@ -291,21 +301,25 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 	return out, nil
 }
 
+// pushMovie is one movies element in a /sync/history POST.
 type pushMovie struct {
 	WatchedAt string   `json:"watched_at"`
 	IDs       simklIDs `json:"ids"`
 }
 
+// pushEpisode is one episode element inside a pushSeason.
 type pushEpisode struct {
 	Number    int    `json:"number"`
 	WatchedAt string `json:"watched_at"`
 }
 
+// pushSeason groups pushEpisodes under one season number.
 type pushSeason struct {
 	Number   int           `json:"number"`
 	Episodes []pushEpisode `json:"episodes"`
 }
 
+// pushShow is one shows element in a /sync/history POST.
 type pushShow struct {
 	IDs     simklIDs     `json:"ids"`
 	Seasons []pushSeason `json:"seasons,omitempty"`

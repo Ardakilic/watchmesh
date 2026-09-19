@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// deviceCodeResp is the /oauth/device/code response with the user code.
 type deviceCodeResp struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -19,6 +20,7 @@ type deviceCodeResp struct {
 	Interval        int    `json:"interval"`
 }
 
+// deviceTokenResp is the /oauth/device/token success response.
 type deviceTokenResp struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`

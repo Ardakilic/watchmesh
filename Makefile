@@ -1,4 +1,4 @@
-GO := golang:1.24.13-bookworm
+GO := golang:1.27.1-bookworm
 RUN := docker run --rm -v $(PWD):/src -w /src $(GO)
 MIGRATE := migrate/migrate:v4.20.1
 

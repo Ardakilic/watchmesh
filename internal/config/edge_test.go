@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// unsetEnv clears key for the test, restoring it on cleanup.
 func unsetEnv(t *testing.T, key string) {
 	t.Helper()
 	if v, ok := os.LookupEnv(key); ok {
@@ -16,6 +17,7 @@ func unsetEnv(t *testing.T, key string) {
 	_ = os.Unsetenv(key)
 }
 
+// TestDefaultWritePathBranches verifies XDG vs home-dir write paths.
 func TestDefaultWritePathBranches(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
 	if got := DefaultWritePath(); got != filepath.Join("/tmp/xdg", "watchmesh", "config.json") {
@@ -31,12 +33,14 @@ func TestDefaultWritePathBranches(t *testing.T) {
 	}
 }
 
+// TestLoadMissingExplicit verifies an explicit missing path fails.
 func TestLoadMissingExplicit(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "nope.json"), "", ""); err == nil {
 		t.Fatal("missing explicit path must fail")
 	}
 }
 
+// TestLoadMalformed verifies invalid JSON fails.
 func TestLoadMalformed(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	writeFile(t, p, `not json`)
@@ -45,6 +49,7 @@ func TestLoadMalformed(t *testing.T) {
 	}
 }
 
+// TestLoadNoFileDefaults verifies defaults apply with no config file.
 func TestLoadNoFileDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -60,6 +65,7 @@ func TestLoadNoFileDefaults(t *testing.T) {
 	}
 }
 
+// TestLoadBadInterval verifies an unparseable interval fails.
 func TestLoadBadInterval(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	writeFile(t, p, `{"interval":"bogus"}`)
@@ -69,6 +75,7 @@ func TestLoadBadInterval(t *testing.T) {
 	}
 }
 
+// TestLoadValidateError verifies Load surfaces Validate failures.
 func TestLoadValidateError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	writeFile(t, p, `{"connections":{"a":{"type":"trakt"}},"syncs":[{"name":"m","source":"ghost","targets":["a"]}]}`)
@@ -77,6 +84,7 @@ func TestLoadValidateError(t *testing.T) {
 	}
 }
 
+// TestValidateSyncNames verifies empty/duplicate sync names fail.
 func TestValidateSyncNames(t *testing.T) {
 	base := &Config{Connections: map[string]Connection{"a": {Type: "trakt"}}}
 	if err := (&Config{

@@ -18,6 +18,7 @@ type failStore struct {
 	setRuns                      int
 }
 
+// LastRun returns the scripted cursor or lastRunErr.
 func (f *failStore) LastRun(context.Context, string) (time.Time, error) {
 	if f.lastRunErr != nil {
 		return time.Time{}, f.lastRunErr
@@ -25,6 +26,7 @@ func (f *failStore) LastRun(context.Context, string) (time.Time, error) {
 	return f.lastRun, nil
 }
 
+// Seen returns the scripted seen state or seenErr.
 func (f *failStore) Seen(_ context.Context, sync, hash string) (bool, error) {
 	if f.seenErr != nil {
 		return false, f.seenErr
@@ -33,6 +35,7 @@ func (f *failStore) Seen(_ context.Context, sync, hash string) (bool, error) {
 	return ok, nil
 }
 
+// MarkSeen records the hash or returns markErr.
 func (f *failStore) MarkSeen(_ context.Context, sync, hash string, at time.Time) error {
 	if f.markErr != nil {
 		return f.markErr
@@ -44,6 +47,7 @@ func (f *failStore) MarkSeen(_ context.Context, sync, hash string, at time.Time)
 	return nil
 }
 
+// SetLastRun advances the cursor or returns setErr.
 func (f *failStore) SetLastRun(_ context.Context, _ string, t time.Time) error {
 	if f.setErr != nil {
 		return f.setErr
@@ -53,6 +57,7 @@ func (f *failStore) SetLastRun(_ context.Context, _ string, t time.Time) error {
 	return nil
 }
 
+// TestSyncStoreErrors verifies each Store failure mode surfaces and holds state.
 func TestSyncStoreErrors(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)

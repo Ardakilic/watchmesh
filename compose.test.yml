@@ -11,7 +11,7 @@ services:
       timeout: 5s
       retries: 5
   tester:
-    image: golang:1.24.13-bookworm
+    image: golang:1.27.1-bookworm
     working_dir: /src
     volumes:
       - .:/src

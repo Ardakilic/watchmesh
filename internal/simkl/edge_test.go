@@ -13,6 +13,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// closedURL returns the URL of an already-closed server for transport errors.
 func closedURL(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -21,6 +22,7 @@ func closedURL(t *testing.T) string {
 	return url
 }
 
+// TestNameAndHTTPClient verifies Name and the nil/custom HTTP selection.
 func TestNameAndHTTPClient(t *testing.T) {
 	if New("http://x", "c", "t").Name() != "simkl" {
 		t.Fatal("Name must be simkl")
@@ -34,12 +36,14 @@ func TestNameAndHTTPClient(t *testing.T) {
 	}
 }
 
+// TestNewDefaultBaseURL verifies empty base falls back to DefaultBaseURL.
 func TestNewDefaultBaseURL(t *testing.T) {
 	if got := New("", "c", "t").BaseURL; got != DefaultBaseURL {
 		t.Fatalf("got %q", got)
 	}
 }
 
+// TestParseTimeZero verifies empty/unparseable timestamps yield zero time.
 func TestParseTimeZero(t *testing.T) {
 	if !parseTime("").IsZero() {
 		t.Fatal("empty must be zero")
@@ -49,6 +53,7 @@ func TestParseTimeZero(t *testing.T) {
 	}
 }
 
+// TestDoWithRetryEdges verifies build errors, passthrough, 429 retry, and cancel.
 func TestDoWithRetryEdges(t *testing.T) {
 	ctx := context.Background()
 	buildErr := errors.New("boom")
@@ -133,6 +138,7 @@ func TestDoWithRetryEdges(t *testing.T) {
 	}
 }
 
+// TestThrottlePOSTSecondCall verifies the 1 POST/s spacing sleep.
 func TestThrottlePOSTSecondCall(t *testing.T) {
 	c := New("http://x", "c", "t")
 	c.lastPOST = time.Now().Add(-900 * time.Millisecond)
@@ -146,6 +152,7 @@ func TestThrottlePOSTSecondCall(t *testing.T) {
 	}
 }
 
+// TestActivitiesTransportErrors verifies activities build/Do failures surface.
 func TestActivitiesTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	if _, err := New("http://bad-\x7f-host", "c", "t").History(ctx, time.Time{}); err == nil {
@@ -156,6 +163,7 @@ func TestActivitiesTransportErrors(t *testing.T) {
 	}
 }
 
+// TestHistoryFetchError verifies an all-items failure fails History.
 func TestHistoryFetchError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/sync/activities" {
@@ -171,6 +179,7 @@ func TestHistoryFetchError(t *testing.T) {
 	}
 }
 
+// TestFetchCategoryEdges verifies transport, body, fallback, and filter edges.
 func TestFetchCategoryEdges(t *testing.T) {
 	ctx := context.Background()
 	bad := New("http://bad-\x7f-host", "c", "t")
@@ -246,6 +255,7 @@ func TestFetchCategoryEdges(t *testing.T) {
 	}
 }
 
+// TestPushEdges verifies zero-time stamping, bare shows, and transport errors.
 func TestPushEdges(t *testing.T) {
 	ctx := context.Background()
 	// Zero WatchedAt stamped; bare show (no season/episode) posts IDs only.
@@ -281,6 +291,7 @@ func TestPushEdges(t *testing.T) {
 	}
 }
 
+// TestAuthEdges verifies PIN transport, body, poll, and cancel errors.
 func TestAuthEdges(t *testing.T) {
 	ctx := context.Background()
 	bad := New("http://bad-\x7f-host", "c", "t")

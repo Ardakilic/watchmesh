@@ -13,11 +13,13 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
+// item builds a WatchItem with a TMDB ID and fixed timestamp.
 func item(mediaType string, tmdb int) model.WatchItem {
 	return model.WatchItem{IDs: model.IDs{TMDB: tmdb}, MediaType: mediaType,
 		Title: "T", WatchedAt: time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)}
 }
 
+// TestPush verifies per-item POST path, Bearer auth, body, and error statuses.
 func TestPush(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -69,6 +71,7 @@ func TestPush(t *testing.T) {
 	}
 }
 
+// TestPushSkipsNoTMDB verifies TMDB==0 items send no requests.
 func TestPushSkipsNoTMDB(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +87,7 @@ func TestPushSkipsNoTMDB(t *testing.T) {
 	}
 }
 
+// TestPushNoBatch verifies one POST goes out per item, no batch call.
 func TestPushNoBatch(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +104,7 @@ func TestPushNoBatch(t *testing.T) {
 	}
 }
 
+// TestHistoryPagination verifies next-continuation pages concatenate.
 func TestHistoryPagination(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		off := r.URL.Query().Get("offset")
@@ -123,6 +128,7 @@ func TestHistoryPagination(t *testing.T) {
 	}
 }
 
+// TestHistoryError verifies 500/malformed history responses fail.
 func TestHistoryError(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -145,6 +151,7 @@ func TestHistoryError(t *testing.T) {
 	}
 }
 
+// TestValidateToken verifies 200 passes and a bad token fails.
 func TestValidateToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {

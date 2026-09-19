@@ -37,6 +37,7 @@ type Config struct {
 	Syncs       []Sync
 }
 
+// rawConfig is the on-disk JSON shape before env expansion and validation.
 type rawConfig struct {
 	Interval    string                `json:"interval"`
 	DatabaseURL string                `json:"database_url"`
@@ -74,6 +75,7 @@ func DefaultWritePath() string {
 	return filepath.Join(".config", "watchmesh", "config.json")
 }
 
+// searchPaths lists config candidates in precedence order (XDG, std, legacy).
 func searchPaths() []string {
 	var out []string
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {

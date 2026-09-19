@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// writeFile creates parent dirs and writes content to path.
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -17,6 +18,7 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+// validJSON is a minimal config exercising interval, env expansion, and syncs.
 const validJSON = `{
   "interval": "15m",
   "database_url": "env:TEST_WM_DB",
@@ -28,6 +30,7 @@ const validJSON = `{
   "syncs": [{"name": "main", "source": "trakt_main", "targets": ["simkl_main"]}]
 }`
 
+// TestLoad verifies file parsing, defaults, and env: expansion.
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.json")
@@ -52,6 +55,7 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// TestLoadPrecedence verifies flag > env > file precedence.
 func TestLoadPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.json")
@@ -76,6 +80,7 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 }
 
+// TestValidate verifies duplicate types pass while unknown refs fail.
 func TestValidate(t *testing.T) {
 	ok := &Config{
 		Connections: map[string]Connection{
@@ -106,6 +111,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// TestHome verifies config path resolution order: flag > env > XDG > std > legacy.
 func TestHome(t *testing.T) {
 	home := t.TempDir()
 	xdg := t.TempDir()

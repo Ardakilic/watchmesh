@@ -25,6 +25,7 @@ type Client struct {
 	HTTP    *http.Client // nil => http.DefaultClient
 }
 
+// New builds a Client for a Yamtrack base URL and token.
 func New(baseURL, token string) *Client {
 	return &Client{BaseURL: strings.TrimSuffix(strings.TrimSpace(baseURL), "/"), Token: token}
 }
@@ -32,6 +33,7 @@ func New(baseURL, token string) *Client {
 // Name implements model.Target/model.Source.
 func (c *Client) Name() string { return "yamtrack" }
 
+// httpClient returns the injected client, or http.DefaultClient when nil.
 func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
@@ -58,6 +60,7 @@ func mediaKind(w model.WatchItem) (string, bool) {
 	return "", false
 }
 
+// endDate formats WatchedAt as YYYY-MM-DD; zero time becomes today.
 func endDate(w model.WatchItem) string {
 	t := w.WatchedAt
 	if t.IsZero() {
@@ -92,6 +95,7 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 	return nil
 }
 
+// pushOne POSTs one item body to /api/v1/media/{kind}/.
 func (c *Client) pushOne(ctx context.Context, kind string, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/media/"+kind+"/", bytes.NewReader(body))
 	if err != nil {
@@ -114,6 +118,7 @@ func (c *Client) pushOne(ctx context.Context, kind string, body []byte) error {
 	return nil
 }
 
+// yamItem is one media element from a Yamtrack paginated response.
 type yamItem struct {
 	Source    string `json:"source"`
 	MediaType string `json:"media_type"`
@@ -122,11 +127,13 @@ type yamItem struct {
 	EndDate   string `json:"end_date"`
 }
 
+// yamPage is a DRF-style paginated response; Next is the continuation.
 type yamPage struct {
 	Results []yamItem `json:"results"`
 	Next    *string   `json:"next"`
 }
 
+// fromItem maps a yamItem to a WatchItem; ok=false skips zero MediaID.
 func fromItem(y yamItem) (model.WatchItem, bool) {
 	if y.MediaID == 0 {
 		return model.WatchItem{}, false
@@ -202,6 +209,7 @@ func resolveNext(base, next string) string {
 	return ""
 }
 
+// fetchPage GETs one Yamtrack media page from u.
 func (c *Client) fetchPage(ctx context.Context, u string) (yamPage, error) {
 	var p yamPage
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
