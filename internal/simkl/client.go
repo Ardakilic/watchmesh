@@ -165,27 +165,33 @@ type notFoundEntry struct {
 	IDs simklIDs `json:"ids"`
 }
 
-// movieItem is one movies element from /sync/all-items/movies.
-type movieItem struct {
-	Title       string   `json:"title"`
-	Year        int      `json:"year"`
-	IDs         simklIDs `json:"ids"`
-	WatchedAt   string   `json:"watched_at"`
-	LastWatched string   `json:"last_watched_at"`
+// nestedMedia is the inner movie/show object in an all-items entry.
+type nestedMedia struct {
+	Title string   `json:"title"`
+	Year  int      `json:"year"`
+	IDs   simklIDs `json:"ids"`
 }
 
-// showItem is one shows/anime element with seasons from /sync/all-items.
-type showItem struct {
-	Title   string   `json:"title"`
-	Year    int      `json:"year"`
-	IDs     simklIDs `json:"ids"`
-	Seasons []struct {
-		Number   int `json:"number"`
-		Episodes []struct {
-			Number    int    `json:"number"`
-			WatchedAt string `json:"watched_at"`
-		} `json:"episodes"`
-	} `json:"seasons"`
+// allEpisode is one episode with its watched timestamp.
+type allEpisode struct {
+	Number    int    `json:"number"`
+	WatchedAt string `json:"watched_at"`
+}
+
+// allSeason groups allEpisodes under one season number.
+type allSeason struct {
+	Number   int          `json:"number"`
+	Episodes []allEpisode `json:"episodes"`
+}
+
+// allItemsEntry is one nested all-items entry: top-level status and
+// last_watched_at plus the inner movie/show object and seasons.
+type allItemsEntry struct {
+	Status        string      `json:"status"`
+	LastWatchedAt string      `json:"last_watched_at"`
+	Movie         nestedMedia `json:"movie"`
+	Show          nestedMedia `json:"show"`
+	Seasons       []allSeason `json:"seasons"`
 }
 
 // toIDs converts Simkl ids to model IDs.
@@ -193,71 +199,85 @@ func toIDs(s simklIDs) model.IDs {
 	return model.IDs{Simkl: s.Simkl, IMDB: s.IMDB, TMDB: s.TMDB, TVDB: s.TVDB}
 }
 
-// fetchCategory GETs /sync/all-items/{cat}, filtering entries older than since.
-func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
-	u := fmt.Sprintf("%s/sync/all-items/%s", c.BaseURL, cat)
+// allItemsURL builds the /sync/all-items/{cat}/{bucket} URL with the
+// extended params needed for real per-episode dates and optional date_from.
+func (c *Client) allItemsURL(cat, bucket string, since time.Time) string {
+	u := c.BaseURL + "/sync/all-items/" + cat + "/" + bucket + "?extended=full&episode_watched_at=yes&include_all_episodes=original"
 	if !since.IsZero() {
-		u += "?date_from=" + since.UTC().Format(time.RFC3339)
+		u += "&date_from=" + since.UTC().Format(time.RFC3339)
 	}
-	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
-		c.throttleGET()
-		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	return u
+}
+
+// fetchCategory GETs completed+watching buckets for cat and emits only
+// actually-watched entries: movies with non-empty last_watched_at,
+// episodes with non-empty episode watched_at. Everything else
+// (plan-to-watch, dropped, never-watched, zero timestamps) is dropped.
+// Entries older than since are filtered.
+func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
+	var out []model.WatchItem
+	for _, bucket := range []string{"completed", "watching"} {
+		u := c.allItemsURL(cat, bucket, since)
+		resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
+			c.throttleGET()
+			req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+			if err != nil {
+				return nil, err
+			}
+			c.setHeaders(req)
+			return req, nil
+		})
 		if err != nil {
 			return nil, err
 		}
-		c.setHeaders(req)
-		return req, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("simkl all-items %s: status %d", cat, resp.StatusCode)
-	}
-	var out []model.WatchItem
-	if cat == "movies" {
-		var v struct {
-			Movies []movieItem `json:"movies"`
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("simkl all-items %s: status %d", cat, resp.StatusCode)
 		}
+		var v map[string][]allItemsEntry
 		if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+			resp.Body.Close()
 			return nil, fmt.Errorf("simkl all-items %s: malformed response: %w", cat, err)
 		}
-		for _, m := range v.Movies {
-			at := parseTime(m.WatchedAt)
-			if at.IsZero() {
-				at = parseTime(m.LastWatched)
-			}
-			if !since.IsZero() && !at.IsZero() && at.Before(since) {
-				continue
-			}
-			out = append(out, model.WatchItem{
-				IDs: toIDs(m.IDs), MediaType: "movie",
-				Title: m.Title, Year: m.Year, WatchedAt: at,
-			})
-		}
-		return out, nil
-	}
-	var v map[string][]showItem
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		return nil, fmt.Errorf("simkl all-items %s: malformed response: %w", cat, err)
-	}
-	list := v[cat]
-	if list == nil {
-		list = v["shows"]
-	}
-	for _, s := range list {
-		for _, sn := range s.Seasons {
-			for _, ep := range sn.Episodes {
-				at := parseTime(ep.WatchedAt)
-				if !since.IsZero() && !at.IsZero() && at.Before(since) {
+		resp.Body.Close()
+		list := v[cat]
+		if cat == "movies" {
+			for _, e := range list {
+				at := parseTime(e.LastWatchedAt)
+				if at.IsZero() {
 					continue
 				}
+				if !since.IsZero() && at.Before(since) {
+					continue
+				}
+				m := e.Movie
 				out = append(out, model.WatchItem{
-					IDs: toIDs(s.IDs), MediaType: "episode",
-					Title: s.Title, Year: s.Year,
-					Season: sn.Number, Episode: ep.Number, WatchedAt: at,
+					IDs: toIDs(m.IDs), MediaType: "movie",
+					Title: m.Title, Year: m.Year, WatchedAt: at,
 				})
+			}
+			continue
+		}
+		for _, e := range list {
+			s := e.Show
+			if s.Title == "" && e.Movie.Title != "" {
+				s = e.Movie
+			}
+			for _, sn := range e.Seasons {
+				for _, ep := range sn.Episodes {
+					at := parseTime(ep.WatchedAt)
+					if at.IsZero() {
+						continue
+					}
+					if !since.IsZero() && at.Before(since) {
+						continue
+					}
+					out = append(out, model.WatchItem{
+						IDs: toIDs(s.IDs), MediaType: "episode",
+						Title: s.Title, Year: s.Year,
+						Season: sn.Number, Episode: ep.Number, WatchedAt: at,
+					})
+				}
 			}
 		}
 	}
@@ -272,13 +292,15 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 		return nil, err
 	}
 	var out []model.WatchItem
-	for _, cat := range []string{"movies", "shows", "anime"} {
+	for _, cc := range []struct{ cat, actKey string }{
+		{"movies", "movies"}, {"shows", "tv_shows"}, {"anime", "anime"},
+	} {
 		if !since.IsZero() {
-			if t := parseTime(acts[cat].WatchedAt); !t.IsZero() && !t.After(since) {
+			if t := parseTime(acts[cc.actKey].WatchedAt); !t.IsZero() && !t.After(since) {
 				continue
 			}
 		}
-		items, err := c.fetchCategory(ctx, cat, since)
+		items, err := c.fetchCategory(ctx, cc.cat, since)
 		if err != nil {
 			return nil, err
 		}

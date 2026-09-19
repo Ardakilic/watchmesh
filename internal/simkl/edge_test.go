@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,7 +204,7 @@ func TestActivitiesTransportErrors(t *testing.T) {
 func TestHistoryFetchError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/sync/activities" {
-			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"shows":{"watched_at":"2026-05-01T00:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
+			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"tv_shows":{"watched_at":"2026-05-01T00:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
 			return
 		}
 		w.WriteHeader(500)
@@ -215,7 +216,7 @@ func TestHistoryFetchError(t *testing.T) {
 	}
 }
 
-// TestFetchCategoryEdges verifies transport, body, fallback, and filter edges.
+// TestFetchCategoryEdges verifies transport, body, nested-shape, and filter edges.
 func TestFetchCategoryEdges(t *testing.T) {
 	ctx := context.Background()
 	bad := New("http://bad-\x7f-host", "c", "t")
@@ -244,12 +245,16 @@ func TestFetchCategoryEdges(t *testing.T) {
 			t.Fatalf("%v must fail", tt)
 		}
 	}
-	// last_watched_at fallback + since filter.
+	// last_watched_at drives movies + since filter; watching bucket empty.
 	since := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			fmt.Fprint(w, `{"movies":[]}`)
+			return
+		}
 		fmt.Fprint(w, `{"movies":[
-			{"title":"Fallback","year":2007,"ids":{"simkl":1},"watched_at":"","last_watched_at":"2026-05-15T22:30:00Z"},
-			{"title":"Old","year":2001,"ids":{"simkl":2},"watched_at":"2026-05-01T00:00:00Z"}
+			{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"Fallback","year":2007,"ids":{"simkl":1}}},
+			{"status":"completed","last_watched_at":"2026-05-01T00:00:00Z","movie":{"title":"Old","year":2001,"ids":{"simkl":2}}}
 		]}`)
 	}))
 	defer srv.Close()
@@ -263,9 +268,13 @@ func TestFetchCategoryEdges(t *testing.T) {
 	if got[0].WatchedAt.Day() != 15 {
 		t.Fatalf("last_watched not used: %+v", got[0])
 	}
-	// shows fallback key when category key is absent.
+	// anime uses its own top-level key in nested shape.
 	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"shows":[{"title":"S","ids":{"simkl":9},"seasons":[{"number":1,"episodes":[{"number":2,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}`)
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			fmt.Fprint(w, `{"anime":[]}`)
+			return
+		}
+		fmt.Fprint(w, `{"anime":[{"status":"completed","last_watched_at":"2026-05-13T19:00:00Z","show":{"title":"S","ids":{"simkl":9}},"seasons":[{"number":1,"episodes":[{"number":2,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}`)
 	}))
 	defer srv2.Close()
 	got, err = New(srv2.URL, "c", "t").fetchCategory(ctx, "anime", time.Time{})
@@ -282,7 +291,11 @@ func TestFetchCategoryEdges(t *testing.T) {
 	}
 	// Old episodes are filtered by since.
 	srv4 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"shows":[{"title":"S","ids":{"simkl":9},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2020-01-01T00:00:00Z"}]}]}]}`)
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			fmt.Fprint(w, `{"shows":[]}`)
+			return
+		}
+		fmt.Fprint(w, `{"shows":[{"status":"completed","last_watched_at":"2020-01-01T00:00:00Z","show":{"title":"S","ids":{"simkl":9}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2020-01-01T00:00:00Z"}]}]}]}`)
 	}))
 	defer srv4.Close()
 	got, err = New(srv4.URL, "c", "t").fetchCategory(ctx, "shows", since)
@@ -396,5 +409,144 @@ func TestAuthEdges(t *testing.T) {
 	time.AfterFunc(20*time.Millisecond, cancel3)
 	if _, err := New(srv3.URL, "c", "t").PollPINToken(ctx3, "PIN", 5*time.Second); err == nil {
 		t.Fatal("cancel during sleep must fail")
+	}
+}
+
+// TestFetchExcludesUnwatchedStatuses verifies plantowatch/dropped/never-watched
+// entries (null last_watched_at, unwatched episodes) emit nothing.
+func TestFetchExcludesUnwatchedStatuses(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			if strings.Contains(r.URL.Path, "/movies/") {
+				fmt.Fprint(w, `{"movies":[]}`)
+			} else {
+				fmt.Fprint(w, `{"shows":[]}`)
+			}
+			return
+		}
+		if strings.Contains(r.URL.Path, "/movies/") {
+			fmt.Fprint(w, `{"movies":[
+				{"status":"plantowatch","last_watched_at":null,"movie":{"title":"P","year":2020,"ids":{"simkl":1}}},
+				{"status":"dropped","last_watched_at":null,"movie":{"title":"D","year":2021,"ids":{"simkl":2}}},
+				{"status":"completed","last_watched_at":null,"movie":{"title":"N","year":2022,"ids":{"simkl":3}}},
+				{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"W","year":2023,"ids":{"simkl":4}}}
+			]}`)
+			return
+		}
+		fmt.Fprint(w, `{"shows":[
+			{"status":"plantowatch","last_watched_at":null,"show":{"title":"P","ids":{"simkl":11}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":""}]}]},
+			{"status":"dropped","last_watched_at":null,"show":{"title":"D","ids":{"simkl":12}},"seasons":[{"number":1,"episodes":[{"number":1}]}]},
+			{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","show":{"title":"W","ids":{"simkl":13}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-05-15T22:30:00Z"}]}]}
+		]}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "c", "t").fetchCategory(ctx, "movies", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "W" {
+		t.Fatalf("movies got=%+v want only watched", got)
+	}
+	got, err = New(srv.URL, "c", "t").fetchCategory(ctx, "shows", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].IDs.Simkl != 13 {
+		t.Fatalf("shows got=%+v want only watched episode", got)
+	}
+}
+
+// TestFetchIncludesWatchingBucket verifies watching-bucket episodes with real
+// watched_at dates are emitted, not dropped as unwatched.
+func TestFetchIncludesWatchingBucket(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			fmt.Fprint(w, `{"shows":[{"status":"watching","last_watched_at":"2026-05-13T19:00:00Z","show":{"title":"W","year":2010,"ids":{"simkl":21}},"seasons":[{"number":1,"episodes":[{"number":3,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}`)
+			return
+		}
+		fmt.Fprint(w, `{"shows":[]}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "c", "t").fetchCategory(ctx, "shows", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Episode != 3 || got[0].WatchedAt.IsZero() {
+		t.Fatalf("got=%+v want watching-bucket episode", got)
+	}
+}
+
+// TestHistorySkipsUnchangedTVShows verifies an unchanged tv_shows cursor skips
+// all-items fetches for shows while dirty movies still fetch.
+func TestHistorySkipsUnchangedTVShows(t *testing.T) {
+	var showsHits, moviesHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/sync/activities":
+			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"tv_shows":{"watched_at":"2026-05-01T00:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
+		case strings.Contains(r.URL.Path, "/movies/"):
+			moviesHits++
+			fmt.Fprint(w, `{"movies":[]}`)
+		case strings.Contains(r.URL.Path, "/shows/"):
+			showsHits++
+			fmt.Fprint(w, `{"shows":[]}`)
+		case strings.Contains(r.URL.Path, "/anime/"):
+			t.Error("anime unchanged, must not fetch")
+			fmt.Fprint(w, `{"anime":[]}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	since := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
+	if _, err := New(srv.URL, "c", "t").History(context.Background(), since); err != nil {
+		t.Fatal(err)
+	}
+	if showsHits != 0 {
+		t.Fatalf("showsHits=%d want 0 (tv_shows unchanged)", showsHits)
+	}
+	if moviesHits != 2 {
+		t.Fatalf("moviesHits=%d want 2 (completed+watching)", moviesHits)
+	}
+}
+
+// TestFetchExcludesZeroTimestamps verifies empty/missing timestamps emit nothing.
+func TestFetchExcludesZeroTimestamps(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			if strings.Contains(r.URL.Path, "/movies/") {
+				fmt.Fprint(w, `{"movies":[]}`)
+			} else {
+				fmt.Fprint(w, `{"shows":[]}`)
+			}
+			return
+		}
+		if strings.Contains(r.URL.Path, "/movies/") {
+			fmt.Fprint(w, `{"movies":[
+				{"status":"completed","last_watched_at":"","movie":{"title":"E","ids":{"simkl":31}}},
+				{"status":"completed","last_watched_at":null,"movie":{"title":"N","ids":{"simkl":32}}}
+			]}`)
+			return
+		}
+		fmt.Fprint(w, `{"shows":[{"status":"watching","show":{"title":"Z","ids":{"simkl":33}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":""},{"number":2}]}]}]}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "c", "t").fetchCategory(ctx, "movies", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("movies got=%v want empty", got)
+	}
+	got, err = New(srv.URL, "c", "t").fetchCategory(ctx, "shows", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("shows got=%v want empty", got)
 	}
 }

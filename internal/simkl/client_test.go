@@ -31,7 +31,7 @@ func TestHistorySkipsWhenUnchanged(t *testing.T) {
 		n++
 		checkHeaders(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-10T20:00:00Z"},"shows":{"watched_at":"2026-05-10T20:00:00Z"},"anime":{"watched_at":"2026-05-10T20:00:00Z"}}`)
+		fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-10T20:00:00Z"},"tv_shows":{"watched_at":"2026-05-10T20:00:00Z"},"anime":{"watched_at":"2026-05-10T20:00:00Z"}}`)
 	}))
 	defer srv.Close()
 	since := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
@@ -47,22 +47,34 @@ func TestHistorySkipsWhenUnchanged(t *testing.T) {
 	}
 }
 
-// TestHistoryFetchesWhenNewer verifies dirty categories fetch with date_from.
+// TestHistoryFetchesWhenNewer verifies dirty categories fetch completed+watching
+// buckets with extended params and date_from, emitting nested watched entries.
 func TestHistoryFetchesWhenNewer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		checkHeaders(t, r)
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/sync/activities":
-			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"shows":{"watched_at":"2026-05-13T19:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
-		case strings.HasSuffix(r.URL.Path, "/movies"):
+			fmt.Fprint(w, `{"movies":{"watched_at":"2026-05-15T22:30:00Z"},"tv_shows":{"watched_at":"2026-05-13T19:00:00Z"},"anime":{"watched_at":"2026-05-01T00:00:00Z"}}`)
+		case strings.HasPrefix(r.URL.Path, "/sync/all-items/movies/"):
+			checkExtended(t, r)
 			if r.URL.Query().Get("date_from") == "" {
 				t.Error("missing date_from")
 			}
-			fmt.Fprint(w, `{"movies":[{"title":"M","year":2007,"ids":{"simkl":1015859},"watched_at":"2026-05-15T22:30:00Z"}]}`)
-		case strings.HasSuffix(r.URL.Path, "/shows"):
-			fmt.Fprint(w, `{"shows":[{"title":"S","year":2010,"ids":{"simkl":1411674},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}`)
-		case strings.HasSuffix(r.URL.Path, "/anime"):
+			if strings.HasSuffix(r.URL.Path, "/watching") {
+				fmt.Fprint(w, `{"movies":[]}`)
+				return
+			}
+			fmt.Fprint(w, `{"movies":[{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"M","year":2007,"ids":{"simkl":1015859}}}]}`)
+		case strings.HasPrefix(r.URL.Path, "/sync/all-items/shows/"):
+			checkExtended(t, r)
+			if strings.HasSuffix(r.URL.Path, "/watching") {
+				fmt.Fprint(w, `{"shows":[]}`)
+				return
+			}
+			fmt.Fprint(w, `{"shows":[{"status":"completed","last_watched_at":"2026-05-13T19:00:00Z","show":{"title":"S","year":2010,"ids":{"simkl":1411674}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}`)
+		case strings.HasPrefix(r.URL.Path, "/sync/all-items/anime/"):
+			t.Error("anime unchanged, must not fetch")
 			fmt.Fprint(w, `{"anime":[]}`)
 		default:
 			w.WriteHeader(404)
@@ -91,6 +103,15 @@ func TestHistoryFetchesWhenNewer(t *testing.T) {
 	}
 	if ep == nil || ep.Season != 1 || ep.Episode != 1 || ep.IDs.Simkl != 1411674 || ep.WatchedAt.IsZero() {
 		t.Fatalf("episode=%+v", ep)
+	}
+}
+
+// checkExtended asserts the full/episode_watched_at/original extended params.
+func checkExtended(t *testing.T, r *http.Request) {
+	t.Helper()
+	q := r.URL.Query()
+	if q.Get("extended") != "full" || q.Get("episode_watched_at") != "yes" || q.Get("include_all_episodes") != "original" {
+		t.Errorf("missing extended params: %s", r.URL.RawQuery)
 	}
 }
 
