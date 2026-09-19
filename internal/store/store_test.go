@@ -11,20 +11,18 @@ import (
 	migrations "github.com/watchmesh/watchmesh/migrations"
 )
 
-// pgURL returns the test database URL, skipping when PG is unavailable.
+// pgURL returns the isolated test database URL, skipping when PG is
+// unavailable. Only TEST_DATABASE_URL is honored: the suite drops and
+// re-migrates tables (see TestUpgrade0001To0002), so it must never run
+// against a shared application database via DATABASE_URL.
 func pgURL(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("short: needs real PG")
 	}
-	// Isolated test database first; generic DATABASE_URL only as fallback so
-	// migrations and roundtrips never touch shared application data.
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
-		url = os.Getenv("DATABASE_URL")
-	}
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL/DATABASE_URL unset")
+		t.Skip("TEST_DATABASE_URL unset (store tests need an isolated database)")
 	}
 	return url
 }

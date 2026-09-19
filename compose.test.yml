@@ -18,6 +18,9 @@ services:
     command: go test ./... -count=1
     environment:
       DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
+      # Same ephemeral database: the store suite drops/re-migrates tables,
+      # so it requires TEST_DATABASE_URL and never touches DATABASE_URL.
+      TEST_DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
