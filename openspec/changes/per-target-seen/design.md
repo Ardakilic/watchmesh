@@ -82,8 +82,9 @@ items := source.History(ctx, since)   // unchanged; gaps still non-fatal
 for each target t (by connection name):
     fresh[t] = { it in items : !store.Seen(sync, t.Name(), it.Hash()) }
     if fresh[t] empty: continue       // no Push, counts as succeeded
-    if err := t.Push(ctx, fresh[t]): record per-target error; continue
-    for it in fresh[t]: if MarkSeen(sync, t.Name(), it.Hash(), it.WatchedAt) fails:
+    delivered, err := t.Push(ctx, fresh[t])  // delivered ⊆ fresh[t]; skips omitted
+    if err: record per-target error; continue
+    for it in delivered: if MarkSeen(sync, t.Name(), it.Hash(), it.WatchedAt) fails:
         record error; t counts as failed
 if every target succeeded (empty fresh sets count):
     store.SetLastRun(sync, windowEnd)

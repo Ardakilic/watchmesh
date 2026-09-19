@@ -153,8 +153,12 @@ func TestPush(t *testing.T) {
 				{IDs: model.IDs{Simkl: 1015859}, MediaType: "movie", WatchedAt: at},
 				{IDs: model.IDs{Simkl: 1411674}, MediaType: "episode", Season: 1, Episode: 1, WatchedAt: at},
 			}
-			if err := New(srv.URL, "cid", "tok").Push(context.Background(), items); (err != nil) != tt.wantErr {
+			delivered, err := New(srv.URL, "cid", "tok").Push(context.Background(), items)
+			if (err != nil) != tt.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(delivered) != 2 {
+				t.Fatalf("delivered=%d want 2", len(delivered))
 			}
 			if gotPath != "/sync/history" {
 				t.Fatalf("path=%q", gotPath)

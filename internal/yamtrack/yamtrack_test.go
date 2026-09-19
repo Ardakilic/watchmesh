@@ -45,9 +45,12 @@ func TestPush(t *testing.T) {
 				fmt.Fprint(w, tt.body)
 			}))
 			defer srv.Close()
-			err := New(srv.URL, "tok").Push(context.Background(), []model.WatchItem{item("movie", 27205)})
+			delivered, err := New(srv.URL, "tok").Push(context.Background(), []model.WatchItem{item("movie", 27205)})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(delivered) != 1 {
+				t.Fatalf("delivered=%d want 1", len(delivered))
 			}
 			if gotPath != "/api/v1/media/movie/" {
 				t.Fatalf("path=%q", gotPath)
@@ -79,8 +82,10 @@ func TestPushSkipsNoTMDB(t *testing.T) {
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
-	if err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item("movie", 0)}); err != nil {
+	if delivered, err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item("movie", 0)}); err != nil {
 		t.Fatal(err)
+	} else if len(delivered) != 0 {
+		t.Fatalf("delivered=%d want 0", len(delivered))
 	}
 	if n != 0 {
 		t.Fatalf("requests=%d want 0", n)
@@ -95,9 +100,12 @@ func TestPushNoBatch(t *testing.T) {
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
-	err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item("movie", 1), item("show", 2)})
+	delivered, err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item("movie", 1), item("show", 2)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(delivered) != 2 {
+		t.Fatalf("delivered=%d want 2", len(delivered))
 	}
 	if n != 2 {
 		t.Fatalf("requests=%d want 2 (single POST per item)", n)

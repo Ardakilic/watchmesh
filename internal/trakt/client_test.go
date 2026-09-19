@@ -103,6 +103,20 @@ func TestHistoryPagination(t *testing.T) {
 	}
 }
 
+// TestHistoryPageLimit verifies endless history errors instead of truncating.
+func TestHistoryPageLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"watched_at":"2026-05-10T20:00:00Z","movie":{"title":"A","ids":{"trakt":1}}}]`)
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "cid", "sec", "tok").History(context.Background(), time.Time{}); err == nil {
+		t.Fatal("endless pages must fail with a limit error")
+	} else if !strings.Contains(err.Error(), "pages") {
+		t.Fatalf("err=%v want page-limit error", err)
+	}
+}
+
 // TestHistoryError verifies 401/500/malformed history responses fail.
 func TestHistoryError(t *testing.T) {
 	for _, tt := range []struct {
@@ -162,9 +176,12 @@ func TestPush(t *testing.T) {
 				{IDs: model.IDs{Trakt: 1, IMDB: "tt1201607", TMDB: 603}, MediaType: "movie", WatchedAt: at},
 				{IDs: model.IDs{Trakt: 16, TVDB: 269953}, MediaType: "episode", Season: 1, Episode: 1, WatchedAt: at},
 			}
-			err := New(srv.URL, "cid", "sec", "tok").Push(context.Background(), items)
+			delivered, err := New(srv.URL, "cid", "sec", "tok").Push(context.Background(), items)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(delivered) != 2 {
+				t.Fatalf("delivered=%d want 2", len(delivered))
 			}
 			if gotPath != "/sync/history" {
 				t.Fatalf("path=%q", gotPath)

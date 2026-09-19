@@ -27,15 +27,31 @@ type fakeTarget struct {
 	name   string
 	pushes [][]model.WatchItem
 	err    error
+	// drop, when non-nil, simulates a target that skips items: dropped
+	// items are omitted from the delivered set.
+	drop func(model.WatchItem) bool
 }
 
 // Name returns the fake connection name.
 func (f *fakeTarget) Name() string { return f.name }
 
-// Push records items and returns the scripted error.
-func (f *fakeTarget) Push(_ context.Context, items []model.WatchItem) error {
+// Push records items, returns the scripted error, and reports the delivered
+// set (all items minus drops) on success.
+func (f *fakeTarget) Push(_ context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	f.pushes = append(f.pushes, items)
-	return f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.drop == nil {
+		return items, nil
+	}
+	var delivered []model.WatchItem
+	for _, it := range items {
+		if !f.drop(it) {
+			delivered = append(delivered, it)
+		}
+	}
+	return delivered, nil
 }
 
 // memStore is an in-memory Store: cursor plus per-sync per-target seen hashes.
@@ -118,6 +134,32 @@ func TestSyncDiffFiltersSeen(t *testing.T) {
 	}
 	if len(tg.pushes) != 1 || len(tg.pushes[0]) != 1 || tg.pushes[0][0].Hash() != fresh.Hash() {
 		t.Fatalf("expected only fresh item pushed, got %+v", tg.pushes)
+	}
+}
+
+// TestSyncMarksOnlyDelivered verifies skipped items are never marked seen:
+// a target that delivers a subset succeeds, but only delivered hashes record.
+func TestSyncMarksOnlyDelivered(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
+	skipped, kept := item(1, at), item(2, at)
+	src := &fakeSource{items: []model.WatchItem{skipped, kept}}
+	tg := &fakeTarget{name: "t", drop: func(w model.WatchItem) bool {
+		return w.Hash() == skipped.Hash()
+	}}
+	st := newMemStore()
+
+	if err := Sync(ctx, "s", src, []Target{tg}, st); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(tg.pushes) != 1 || len(tg.pushes[0]) != 2 {
+		t.Fatalf("target still receives the full batch, got %+v", tg.pushes)
+	}
+	if seen, _ := st.Seen(ctx, "s", "t", kept.Hash()); !seen {
+		t.Fatal("delivered item must be marked seen")
+	}
+	if seen, _ := st.Seen(ctx, "s", "t", skipped.Hash()); seen {
+		t.Fatal("skipped item must not be marked seen")
 	}
 }
 

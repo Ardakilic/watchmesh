@@ -325,12 +325,15 @@ type pushShow struct {
 	Seasons []pushSeason `json:"seasons,omitempty"`
 }
 
-// Push POSTs /sync/history per design §7 at 1 POST/s.
-func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
+// Push POSTs /sync/history per design §7 at 1 POST/s and returns the items
+// actually delivered; unknown media types are omitted from delivered so the
+// engine never marks them seen.
+func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	body := struct {
 		Movies []pushMovie `json:"movies"`
 		Shows  []pushShow  `json:"shows"`
 	}{Movies: []pushMovie{}, Shows: []pushShow{}}
+	var delivered []model.WatchItem
 	for _, it := range items {
 		at := it.WatchedAt.UTC().Format(time.RFC3339)
 		if it.WatchedAt.IsZero() {
@@ -341,16 +344,19 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 			body.Movies = append(body.Movies, pushMovie{WatchedAt: at, IDs: simklIDs{
 				Simkl: it.IDs.Simkl, IMDB: it.IDs.IMDB, TMDB: it.IDs.TMDB, TVDB: it.IDs.TVDB,
 			}})
+			delivered = append(delivered, it)
 		case "episode", "show":
 			ids := simklIDs{Simkl: it.IDs.Simkl, IMDB: it.IDs.IMDB, TMDB: it.IDs.TMDB, TVDB: it.IDs.TVDB}
 			if it.MediaType == "show" && it.Season == 0 && it.Episode == 0 {
 				body.Shows = append(body.Shows, pushShow{IDs: ids})
+				delivered = append(delivered, it)
 				continue
 			}
 			body.Shows = append(body.Shows, pushShow{IDs: ids, Seasons: []pushSeason{{
 				Number:   it.Season,
 				Episodes: []pushEpisode{{Number: it.Episode, WatchedAt: at}},
 			}}})
+			delivered = append(delivered, it)
 		}
 	}
 	raw, _ := json.Marshal(body)
@@ -364,15 +370,15 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 		return req, nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("simkl push: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("simkl push: status %d", resp.StatusCode)
 	}
 	var v json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		return fmt.Errorf("simkl push: malformed response: %w", err)
+		return nil, fmt.Errorf("simkl push: malformed response: %w", err)
 	}
-	return nil
+	return delivered, nil
 }

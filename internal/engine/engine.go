@@ -17,10 +17,13 @@ type Source interface {
 
 // Target receives fresh watch history. Name is the connection name from
 // config and keys per-target delivery state; it must never be the connector
-// type, since two connections may share one type.
+// type, since two connections may share one type. Push returns the subset of
+// items actually delivered, so the engine marks seen only what reached the
+// service; skipped items (unsupported type, missing IDs, zero timestamp) are
+// reported by omission, never silently marked.
 type Target interface {
 	Name() string
-	Push(ctx context.Context, items []model.WatchItem) error
+	Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error)
 }
 
 // Store persists cursors and per-target seen hashes; *store.Store satisfies it.
@@ -34,15 +37,15 @@ type Store interface {
 // Sync runs since→History→per-target diff→fan-out Push→record state.
 // Each target is diffed against its own seen rows (keyed by connection name)
 // and gets only its missing items; targets with nothing missing get no Push
-// and count as succeeded. Hashes are marked seen per target only after that
-// target's Push succeeded, so one failing target never blocks the others.
-// SetLastRun advances to the window-end captured before History iff every
-// target fully succeeded (Push plus all MarkSeen writes); a held cursor plus
-// per-target diffs makes reruns push only to still-missing targets. A window
-// with nothing fresh anywhere pushes nothing and touches no state. History
-// gaps are non-fatal: connectors return empty,nil on best-effort read
-// failures, which Sync treats as an empty window. Per-target errors are
-// combined in the return value.
+// and count as succeeded. Only items in Push's delivered set are marked seen,
+// so a target that skips an item never records it as delivered. SetLastRun
+// advances to the window-end captured before History iff every target fully
+// succeeded (Push plus all MarkSeen writes); a held cursor plus per-target
+// diffs makes reruns push only to still-missing targets. A window with
+// nothing fresh anywhere pushes nothing and touches no state. History gaps
+// are non-fatal: connectors return empty,nil on best-effort read failures,
+// which Sync treats as an empty window. Per-target errors are combined in
+// the return value.
 func Sync(ctx context.Context, syncName string, src Source, targets []Target, st Store) error {
 	since, err := st.LastRun(ctx, syncName)
 	if err != nil {
@@ -71,13 +74,14 @@ func Sync(ctx context.Context, syncName string, src Source, targets []Target, st
 			continue
 		}
 		anyFresh = true
-		if err := tg.Push(ctx, fresh); err != nil {
+		delivered, err := tg.Push(ctx, fresh)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("target %d: %w", i, err))
 			allOK = false
 			continue
 		}
 		markOK := true
-		for _, it := range fresh {
+		for _, it := range delivered {
 			if err := st.MarkSeen(ctx, syncName, name, it.Hash(), it.WatchedAt); err != nil {
 				errs = append(errs, fmt.Errorf("target %d mark seen: %w", i, err))
 				markOK = false

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -69,9 +70,12 @@ func endDate(w model.WatchItem) string {
 	return t.UTC().Format("2006-01-02")
 }
 
-// Push loops single POST per item, no batch call. TMDB==0 items skipped.
+// Push loops single POST per item, no batch call, and returns the items
+// actually delivered. TMDB==0 items and unknown kinds are omitted from
+// delivered so the engine never marks them.
 // Candidate body (STUB): {source:tmdb, media_type, media_id, status, end_date}.
-func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
+func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
+	var delivered []model.WatchItem
 	for _, it := range items {
 		if it.IDs.TMDB == 0 {
 			continue
@@ -89,10 +93,11 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 		})
 		// STUB: POST vs PATCH per-item confirmed live in task 6.3; POST default.
 		if err := c.pushOne(ctx, kind, body); err != nil {
-			return err
+			return nil, err
 		}
+		delivered = append(delivered, it)
 	}
-	return nil
+	return delivered, nil
 }
 
 // pushOne POSTs one item body to /api/v1/media/{kind}/.
@@ -197,16 +202,49 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 }
 
 // resolveNext turns a pagination.next value into the next request URL.
-// Full URLs and absolute paths are followed; opaque tokens ("x") return ""
-// so the caller falls back to offset paging.
+// Absolute paths stay on the configured host; absolute HTTP(S) URLs are
+// followed only when scheme, host, and port match BaseURL, so fetchPage can
+// never send the Authorization bearer token to a different origin. Anything
+// else (opaque tokens like "x") returns "" and the caller falls back to
+// offset paging.
 func resolveNext(base, next string) string {
-	if strings.HasPrefix(next, "http://") || strings.HasPrefix(next, "https://") {
-		return next
-	}
 	if strings.HasPrefix(next, "/") {
 		return strings.TrimSuffix(base, "/") + next
 	}
-	return ""
+	lowered := strings.ToLower(next)
+	if !strings.HasPrefix(lowered, "http://") && !strings.HasPrefix(lowered, "https://") {
+		return ""
+	}
+	bu, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	nu, err := url.Parse(next)
+	if err != nil {
+		return ""
+	}
+	if !strings.EqualFold(bu.Scheme, nu.Scheme) {
+		return ""
+	}
+	if !strings.EqualFold(bu.Hostname(), nu.Hostname()) {
+		return ""
+	}
+	if effectivePort(bu) != effectivePort(nu) {
+		return ""
+	}
+	return next
+}
+
+// effectivePort returns the explicit port, or the scheme default when absent,
+// so "http://h" and "http://h:80" compare as the same origin.
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 // fetchPage GETs one Yamtrack media page from u.

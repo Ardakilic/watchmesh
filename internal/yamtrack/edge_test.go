@@ -52,6 +52,36 @@ func TestEndDateZero(t *testing.T) {
 	}
 }
 
+// TestResolveNextOrigin verifies continuation URLs never leave the
+// configured origin: absolute same-origin URLs and paths are followed,
+// cross-origin/scheme/port URLs and opaque tokens fall back to offset paging.
+func TestResolveNextOrigin(t *testing.T) {
+	base := "https://yam.example:8443/base"
+	for _, tt := range []struct {
+		next string
+		want string
+	}{
+		{"https://yam.example:8443/base/api/?page=2", "https://yam.example:8443/base/api/?page=2"},
+		{"HTTPS://YAM.EXAMPLE:8443/other", "HTTPS://YAM.EXAMPLE:8443/other"},
+		{"/api/?page=2", "https://yam.example:8443/base/api/?page=2"},
+		{"https://evil.example/api/", ""},
+		{"http://yam.example:8443/api/", ""},
+		{"https://yam.example:9999/api/", ""},
+		{"https://yam.example/api/", ""},
+		{"x", ""},
+		{"", ""},
+		{"://bad", ""},
+	} {
+		if got := resolveNext(base, tt.next); got != tt.want {
+			t.Fatalf("next %q: got %q want %q", tt.next, got, tt.want)
+		}
+	}
+	// Default ports compare equal to explicit ones.
+	if got := resolveNext("http://h", "http://h:80/x"); got == "" {
+		t.Fatal("explicit :80 must match default http port")
+	}
+}
+
 // TestPushSkipsUnknownKind verifies unmapped media types send no requests.
 func TestPushSkipsUnknownKind(t *testing.T) {
 	n := 0
@@ -61,8 +91,10 @@ func TestPushSkipsUnknownKind(t *testing.T) {
 	}))
 	defer srv.Close()
 	it := model.WatchItem{IDs: model.IDs{TMDB: 5}, MediaType: "podcast", WatchedAt: time.Now()}
-	if err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{it}); err != nil {
+	if delivered, err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{it}); err != nil {
 		t.Fatal(err)
+	} else if len(delivered) != 0 {
+		t.Fatalf("delivered=%d want 0", len(delivered))
 	}
 	if n != 0 {
 		t.Fatalf("requests=%d want 0", n)
@@ -73,10 +105,10 @@ func TestPushSkipsUnknownKind(t *testing.T) {
 func TestPushTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	it := []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
-	if err := New("http://bad-\x7f-host", "t").Push(ctx, it); err == nil {
+	if _, err := New("http://bad-\x7f-host", "t").Push(ctx, it); err == nil {
 		t.Fatal("bad URL must fail build")
 	}
-	if err := New(closedURL(t), "t").Push(ctx, it); err == nil {
+	if _, err := New(closedURL(t), "t").Push(ctx, it); err == nil {
 		t.Fatal("closed server must fail Do")
 	}
 }

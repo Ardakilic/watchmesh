@@ -27,7 +27,7 @@ type WatchItem struct {
 }
 func (w WatchItem) Hash() string // sha1(mediatype|trakt|simkl|imdb|tmdb|tvdb|season|episode|watchedAt.UTC)
 type Source interface { Name() string; History(ctx context.Context, since time.Time) ([]WatchItem, error) }
-type Target interface { Name() string; Push(ctx context.Context, items []WatchItem) error }
+type Target interface { Name() string; Push(ctx context.Context, items []WatchItem) (delivered []WatchItem, err error) }
 ```
 
 `engine` depends only on these interfaces; `Hash()` is the idempotency key in `seen_items`.

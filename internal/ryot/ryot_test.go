@@ -42,9 +42,12 @@ func TestPush(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := New(srv.URL, "tok")
-			err := c.Push(context.Background(), []model.WatchItem{item(603)})
+			delivered, err := c.Push(context.Background(), []model.WatchItem{item(603)})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(delivered) != 1 {
+				t.Fatalf("delivered=%d want 1", len(delivered))
 			}
 			if gotPath != "/backend/graphql" {
 				t.Fatalf("path=%q", gotPath)
@@ -64,8 +67,10 @@ func TestPushSkipsNoTMDB(t *testing.T) {
 		fmt.Fprint(w, `{"data":{}}`)
 	}))
 	defer srv.Close()
-	if err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item(0)}); err != nil {
+	if delivered, err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item(0)}); err != nil {
 		t.Fatal(err)
+	} else if len(delivered) != 0 {
+		t.Fatalf("delivered=%d want 0", len(delivered))
 	}
 	if n != 0 {
 		t.Fatalf("requests=%d want 0", n)

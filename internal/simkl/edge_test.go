@@ -274,8 +274,10 @@ func TestPushEdges(t *testing.T) {
 		{IDs: model.IDs{Simkl: 1}, MediaType: "movie"},
 		{IDs: model.IDs{Simkl: 2}, MediaType: "show"},
 	}
-	if err := New(srv.URL, "c", "t").Push(ctx, items); err != nil {
+	if delivered, err := New(srv.URL, "c", "t").Push(ctx, items); err != nil {
 		t.Fatal(err)
+	} else if len(delivered) != 2 {
+		t.Fatalf("delivered=%d want 2", len(delivered))
 	}
 	if len(got.Movies) != 1 || got.Movies[0]["watched_at"] == nil {
 		t.Fatalf("movies=%v", got.Movies)
@@ -283,10 +285,10 @@ func TestPushEdges(t *testing.T) {
 	if len(got.Shows) != 1 || got.Shows[0]["seasons"] != nil {
 		t.Fatalf("bare show=%v", got.Shows)
 	}
-	if err := New("http://bad-\x7f-host", "c", "t").Push(ctx, items); err == nil {
+	if _, err := New("http://bad-\x7f-host", "c", "t").Push(ctx, items); err == nil {
 		t.Fatal("bad base must fail build")
 	}
-	if err := New(closedURL(t), "c", "t").Push(ctx, items); err == nil {
+	if _, err := New(closedURL(t), "c", "t").Push(ctx, items); err == nil {
 		t.Fatal("closed must fail Do")
 	}
 }

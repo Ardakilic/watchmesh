@@ -227,17 +227,24 @@ func TestPushEdges(t *testing.T) {
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
-	if err := New(srv.URL, "c", "s", "t").Push(ctx, []model.WatchItem{{IDs: model.IDs{Trakt: 1}, MediaType: "movie"}}); err != nil {
+	if delivered, err := New(srv.URL, "c", "s", "t").Push(ctx, []model.WatchItem{{IDs: model.IDs{Trakt: 1}, MediaType: "movie"}}); err != nil {
 		t.Fatal(err)
+	} else if len(delivered) != 0 {
+		t.Fatal("zero WatchedAt must be omitted from delivered")
 	}
 	if gotMovies != 0 {
 		t.Fatal("zero WatchedAt must be skipped, not stamped")
 	}
 	items := []model.WatchItem{{IDs: model.IDs{Trakt: 1}, MediaType: "movie", WatchedAt: time.Now()}}
-	if err := New("http://bad-\x7f-host", "c", "s", "t").Push(ctx, items); err == nil {
+	if delivered, err := New(srv.URL, "c", "s", "t").Push(ctx, items); err != nil {
+		t.Fatal(err)
+	} else if len(delivered) != 1 {
+		t.Fatalf("delivered=%d want 1", len(delivered))
+	}
+	if _, err := New("http://bad-\x7f-host", "c", "s", "t").Push(ctx, items); err == nil {
 		t.Fatal("bad base URL must fail build")
 	}
-	if err := New(closedURL(t), "c", "s", "t").Push(ctx, items); err == nil {
+	if _, err := New(closedURL(t), "c", "s", "t").Push(ctx, items); err == nil {
 		t.Fatal("closed server must fail Do")
 	}
 }

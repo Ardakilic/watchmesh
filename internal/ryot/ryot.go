@@ -82,20 +82,23 @@ type gqlResp struct {
 	} `json:"errors"`
 }
 
-// Push sends one GraphQL mutation per item; TMDB==0 items and episodes are
-// skipped (no episode-capable payload yet).
+// Push sends one GraphQL mutation per item and returns the items actually
+// delivered; TMDB==0 items and episodes are skipped (no episode-capable
+// payload yet) and omitted from delivered, so the engine never marks them.
 // Candidate mutation (STUB): mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}.
-func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
+func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
+	var delivered []model.WatchItem
 	for _, it := range items {
 		mid, ok := metadataID(it)
 		if !ok {
 			continue
 		}
 		if err := c.pushOne(ctx, it, mid); err != nil {
-			return err
+			return nil, err
 		}
+		delivered = append(delivered, it)
 	}
-	return nil
+	return delivered, nil
 }
 
 // pushOne POSTs one updateSeenHistory mutation for mid.

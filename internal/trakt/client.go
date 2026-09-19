@@ -134,12 +134,14 @@ func parseTime(s string) time.Time {
 	return time.Time{}
 }
 
-// fetchKind pages one history kind until an empty page (100-page cap).
+// fetchKind pages one history kind until an empty page. The 100-page cap is
+// a loud limit, not a silent truncation: when page 100 is full, one probe
+// page is fetched and a limit error returns if history continues past it.
+// ponytail: page cap, raise if a library ever exceeds 10k history entries.
 func (c *Client) fetchKind(ctx context.Context, kind string, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
-	// ponytail: page cap, raise if a library ever exceeds 10k history entries.
 	const maxPages = 100
-	for page := 1; page <= maxPages; page++ {
+	for page := 1; page <= maxPages+1; page++ {
 		u := fmt.Sprintf("%s/sync/history/%s?page=%d&limit=100", c.BaseURL, kind, page)
 		if !since.IsZero() {
 			u += "&start_at=" + since.UTC().Format(time.RFC3339)
@@ -150,6 +152,9 @@ func (c *Client) fetchKind(ctx context.Context, kind string, since time.Time) ([
 		}
 		if empty {
 			break
+		}
+		if page > maxPages {
+			return nil, fmt.Errorf("trakt history %s: exceeds %d pages, history truncated", kind, maxPages)
 		}
 		out = append(out, entries...)
 	}
@@ -258,14 +263,17 @@ func pushID(ids model.IDs) pushIDs {
 	return pushIDs{Trakt: ids.Trakt, IMDB: ids.IMDB, TMDB: ids.TMDB, TVDB: ids.TVDB}
 }
 
-// Push POSTs /sync/history grouping movies/episodes per design §7.
-// Media types other than movie/episode are skipped (no Trakt shape), as are
-// items with zero WatchedAt: stamping time.Now() would fabricate history.
-func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
+// Push POSTs /sync/history grouping movies/episodes per design §7 and
+// returns the items actually delivered. Media types other than
+// movie/episode and items with zero WatchedAt are skipped (stamping
+// time.Now() would fabricate history) and omitted from delivered, so the
+// engine never marks them seen.
+func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	body := struct {
 		Movies   []pushEntry `json:"movies"`
 		Episodes []pushEntry `json:"episodes"`
 	}{Movies: []pushEntry{}, Episodes: []pushEntry{}}
+	var delivered []model.WatchItem
 	for _, it := range items {
 		if it.WatchedAt.IsZero() {
 			continue
@@ -274,8 +282,10 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 		switch it.MediaType {
 		case "movie":
 			body.Movies = append(body.Movies, pushEntry{WatchedAt: at, IDs: pushID(it.IDs)})
+			delivered = append(delivered, it)
 		case "episode":
 			body.Episodes = append(body.Episodes, pushEntry{WatchedAt: at, IDs: pushID(it.IDs)})
+			delivered = append(delivered, it)
 		}
 	}
 	raw, _ := json.Marshal(body)
@@ -288,15 +298,15 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 		return req, nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("trakt push: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("trakt push: status %d", resp.StatusCode)
 	}
 	var v json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		return fmt.Errorf("trakt push: malformed response: %w", err)
+		return nil, fmt.Errorf("trakt push: malformed response: %w", err)
 	}
-	return nil
+	return delivered, nil
 }

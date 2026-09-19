@@ -74,10 +74,10 @@ func TestFinishedOnZero(t *testing.T) {
 func TestPushTransportErrors(t *testing.T) {
 	ctx := context.Background()
 	it := []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
-	if err := New("http://bad-\x7f-host", "t").Push(ctx, it); err == nil {
+	if _, err := New("http://bad-\x7f-host", "t").Push(ctx, it); err == nil {
 		t.Fatal("bad URL must fail build")
 	}
-	if err := New(closedURL(t), "t").Push(ctx, it); err == nil {
+	if _, err := New(closedURL(t), "t").Push(ctx, it); err == nil {
 		t.Fatal("closed server must fail Do")
 	}
 }
