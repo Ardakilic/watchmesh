@@ -616,3 +616,14 @@ func TestFetchCategoryShowMovieFallback(t *testing.T) {
 		t.Fatalf("got=%+v want Fallback movie fallback", got)
 	}
 }
+
+// TestActivitiesBadCursorType verifies a non-string non-object cursor fails as malformed.
+func TestActivitiesBadCursorType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"movies":123,"tv_shows":{"all":"2026-05-01T00:00:00Z"},"anime":{"all":"2026-05-01T00:00:00Z"}}`)
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "c", "t").History(context.Background(), time.Time{}); err == nil || !strings.Contains(err.Error(), "malformed") {
+		t.Fatalf("err=%v want malformed", err)
+	}
+}

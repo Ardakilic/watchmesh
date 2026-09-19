@@ -216,16 +216,6 @@ func toIDs(s simklIDs) model.IDs {
 	return model.IDs{Simkl: s.Simkl, IMDB: s.IMDB, TMDB: s.TMDB, TVDB: s.TVDB}
 }
 
-// allItemsURL builds the /sync/all-items/{cat}/{bucket} URL with the
-// extended params needed for real per-episode dates and optional date_from.
-func (c *Client) allItemsURL(cat, bucket string, since time.Time) string {
-	u := c.BaseURL + "/sync/all-items/" + cat + "/" + bucket + "?extended=full&episode_watched_at=yes&include_all_episodes=original"
-	if !since.IsZero() {
-		u += "&date_from=" + since.UTC().Format(time.RFC3339)
-	}
-	return u
-}
-
 // fetchCategory GETs completed+watching buckets for cat and emits only
 // actually-watched entries: movies with non-empty last_watched_at,
 // episodes with non-empty episode watched_at. Everything else
@@ -234,7 +224,10 @@ func (c *Client) allItemsURL(cat, bucket string, since time.Time) string {
 func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
 	for _, bucket := range []string{"completed", "watching"} {
-		u := c.allItemsURL(cat, bucket, since)
+		u := c.BaseURL + "/sync/all-items/" + cat + "/" + bucket + "?extended=full&episode_watched_at=yes&include_all_episodes=original"
+		if !since.IsZero() {
+			u += "&date_from=" + since.UTC().Format(time.RFC3339)
+		}
 		resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
 			c.throttleGET()
 			req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
@@ -261,10 +254,7 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 		if cat == "movies" {
 			for _, e := range list {
 				at := parseTime(e.LastWatchedAt)
-				if at.IsZero() {
-					continue
-				}
-				if !since.IsZero() && at.Before(since) {
+				if at.IsZero() || (!since.IsZero() && at.Before(since)) {
 					continue
 				}
 				m := e.Movie
@@ -283,10 +273,7 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 			for _, sn := range e.Seasons {
 				for _, ep := range sn.Episodes {
 					at := parseTime(ep.WatchedAt)
-					if at.IsZero() {
-						continue
-					}
-					if !since.IsZero() && at.Before(since) {
+					if at.IsZero() || (!since.IsZero() && at.Before(since)) {
 						continue
 					}
 					out = append(out, model.WatchItem{
