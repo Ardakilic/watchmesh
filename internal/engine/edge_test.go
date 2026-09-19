@@ -57,6 +57,38 @@ func (f *failStore) SetLastRun(_ context.Context, _ string, t time.Time) error {
 	return nil
 }
 
+// TestSyncRateLimitedTargetHoldsCursor verifies a rate-limited target's items
+// stay unseen with the cursor held, and a re-run after recovery succeeds.
+func TestSyncRateLimitedTargetHoldsCursor(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
+	src := &fakeSource{items: []model.WatchItem{item(1, at), item(2, at)}}
+	tg := &fakeTarget{name: "t", err: errors.New("ryot push: status 429")}
+	st := newMemStore()
+
+	if err := Sync(ctx, "s", src, []Target{tg}, st); err == nil {
+		t.Fatal("rate-limited sync must fail")
+	}
+	for _, it := range src.items {
+		if seen, _ := st.Seen(ctx, "s", "t", it.Hash()); seen {
+			t.Fatal("rate-limited item must stay unseen")
+		}
+	}
+	if st.setRuns != 0 {
+		t.Fatal("cursor must hold while rate-limited")
+	}
+	tg.err, tg.pushes = nil, nil
+	if err := Sync(ctx, "s", src, []Target{tg}, st); err != nil {
+		t.Fatalf("rerun Sync: %v", err)
+	}
+	if len(tg.pushes) != 1 || len(tg.pushes[0]) != 2 {
+		t.Fatalf("rerun must push the full window, got %+v", tg.pushes)
+	}
+	if st.setRuns != 1 {
+		t.Fatal("cursor advances once delivery completes")
+	}
+}
+
 // TestSyncStoreErrors verifies each Store failure mode surfaces and holds state.
 func TestSyncStoreErrors(t *testing.T) {
 	ctx := context.Background()

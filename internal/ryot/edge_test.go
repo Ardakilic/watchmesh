@@ -116,6 +116,39 @@ func TestHistorySkipsAndFilters(t *testing.T) {
 	}
 }
 
+// TestPushRetry429 verifies 429→200 delivers and 429→429 errors with nothing marked.
+func TestPushRetry429(t *testing.T) {
+	ctx := context.Background()
+	newItem := func() []model.WatchItem {
+		return []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
+	}
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprint(w, `{"data":{}}`)
+	}))
+	defer srv.Close()
+	if delivered, err := New(srv.URL, "t").Push(ctx, newItem()); err != nil || len(delivered) != 1 {
+		t.Fatalf("429→200: delivered=%d err=%v", len(delivered), err)
+	}
+	if n != 2 {
+		t.Fatalf("requests=%d want 2", n)
+	}
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv2.Close()
+	if delivered, err := New(srv2.URL, "t").Push(ctx, newItem()); err == nil || len(delivered) != 0 {
+		t.Fatalf("429→429: delivered=%d err=%v, want error and nothing marked", len(delivered), err)
+	}
+}
+
 // TestValidateTokenTransportErrors verifies request build/Do failures surface.
 func TestValidateTokenTransportErrors(t *testing.T) {
 	ctx := context.Background()
