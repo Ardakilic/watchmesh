@@ -141,7 +141,8 @@ func TestSyncDiffFiltersSeen(t *testing.T) {
 }
 
 // TestSyncMarksOnlyDelivered verifies skipped items are never marked seen:
-// a target that delivers a subset succeeds, but only delivered hashes record.
+// a target that delivers a subset succeeds, but only delivered hashes record
+// and the cursor holds so the skipped item stays inside the next window.
 func TestSyncMarksOnlyDelivered(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
@@ -163,6 +164,9 @@ func TestSyncMarksOnlyDelivered(t *testing.T) {
 	}
 	if seen, _ := st.Seen(ctx, "s", "t", skipped.Hash()); seen {
 		t.Fatal("skipped item must not be marked seen")
+	}
+	if st.setRuns != 0 {
+		t.Fatal("subset delivery must hold the cursor")
 	}
 }
 

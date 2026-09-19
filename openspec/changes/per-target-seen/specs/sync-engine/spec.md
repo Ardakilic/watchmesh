@@ -19,8 +19,8 @@ WHEN target B fails while A and C succeed
 THEN the cursor MUST NOT advance, and the next run MUST push the missing items to B only, with zero Push calls to A and C.
 
 #### Scenario: Full success advances the cursor
-WHEN every target's Push and all its `MarkSeen` writes succeed
-THEN the cursor MUST advance to the window-end captured before History.
+WHEN every target's Push delivers its full fresh set and all its `MarkSeen` writes succeed
+THEN the cursor MUST advance to the window-end captured before History; a nil-error subset delivery MUST hold the cursor since skipped items stay unseen.
 
 #### Scenario: MarkSeen failure counts as target failure
 WHEN target A's Push succeeds but any of its `MarkSeen` writes fails

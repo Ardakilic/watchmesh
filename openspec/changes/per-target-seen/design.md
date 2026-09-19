@@ -87,6 +87,7 @@ for each target t (by connection name):
     if err: record per-target error (t counts as failed, cursor holds)
     for it in delivered: if MarkSeen(sync, t.Name(), it.Hash(), it.WatchedAt) fails:
         record error; t counts as failed
+    if len(delivered) != len(fresh[t]): t counts as failed  // nil-error subset holds cursor
 if every target succeeded (empty fresh sets count):
     store.SetLastRun(sync, windowEnd)
 return joined per-target errors       // unchanged shape

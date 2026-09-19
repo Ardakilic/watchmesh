@@ -41,7 +41,9 @@ type Store interface {
 // and count as succeeded. Only items in Push's delivered set are marked seen,
 // so a target that skips an item never records it as delivered; partial
 // deliveries returned alongside an error are still marked, while the cursor
-// stays held so the rerun covers exactly the missing remainder. SetLastRun
+// stays held so the rerun covers exactly the missing remainder. A nil-error
+// subset delivery also holds the cursor: the skipped items stay unseen and an
+// advanced window could exclude them from History forever. SetLastRun
 // advances to the window-end captured before History iff every target fully
 // succeeded (Push plus all MarkSeen writes); a held cursor plus per-target
 // diffs makes reruns push only to still-missing targets. A window with
@@ -90,6 +92,11 @@ func Sync(ctx context.Context, syncName string, src Source, targets []Target, st
 			}
 		}
 		if !markOK {
+			allOK = false
+		}
+		if len(delivered) != len(fresh) {
+			// Nil-error subset: skips stay unseen, so hold the cursor or
+			// the advanced window would exclude them from History forever.
 			allOK = false
 		}
 	}
