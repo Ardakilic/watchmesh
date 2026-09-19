@@ -90,37 +90,31 @@ func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Reque
 	return hc.Do(req2)
 }
 
-// throttleGET enforces 10 GET/s via 100ms spacing.
-func (c *Client) throttleGET() {
+// throttle enforces minimum spacing d since last, updating last under mutex.
+func (c *Client) throttle(last *time.Time, d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.lastGET.IsZero() {
-		if d := 100*time.Millisecond - time.Since(c.lastGET); d > 0 {
-			time.Sleep(d)
+	if !last.IsZero() {
+		if s := d - time.Since(*last); s > 0 {
+			time.Sleep(s)
 		}
 	}
-	c.lastGET = time.Now()
+	*last = time.Now()
 }
+
+// throttleGET enforces 10 GET/s via 100ms spacing.
+func (c *Client) throttleGET() { c.throttle(&c.lastGET, 100*time.Millisecond) }
 
 // throttlePOST enforces 1 POST/s.
 // ponytail: sleep throttle, token-bucket if limits bite.
-func (c *Client) throttlePOST() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.lastPOST.IsZero() {
-		if d := time.Second - time.Since(c.lastPOST); d > 0 {
-			time.Sleep(d)
-		}
-	}
-	c.lastPOST = time.Now()
-}
+func (c *Client) throttlePOST() { c.throttle(&c.lastPOST, time.Second) }
 
 // parseTime parses Simkl timestamps; empty/unparseable yields zero time.
 func parseTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z07:00", "2006-01-02 15:04:05"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t
 		}
@@ -161,7 +155,6 @@ func (c *Client) activities(ctx context.Context) (map[string]activityCursor, err
 // simklIDs is the Simkl ids object shared by movie/show/push items.
 type simklIDs struct {
 	Simkl int    `json:"simkl,omitempty"`
-	Slug  string `json:"slug,omitempty"`
 	IMDB  string `json:"imdb,omitempty"`
 	TMDB  int    `json:"tmdb,omitempty"`
 	TVDB  int    `json:"tvdb,omitempty"`
@@ -278,18 +271,6 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 	if err != nil {
 		return nil, err
 	}
-	if !since.IsZero() {
-		newer := false
-		for _, cat := range []string{"movies", "shows", "anime"} {
-			if t := parseTime(acts[cat].WatchedAt); !t.IsZero() && t.After(since) {
-				newer = true
-				break
-			}
-		}
-		if !newer {
-			return nil, nil
-		}
-	}
 	var out []model.WatchItem
 	for _, cat := range []string{"movies", "shows", "anime"} {
 		if !since.IsZero() {
@@ -393,31 +374,19 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 		return nil, fmt.Errorf("simkl push: malformed response: %w", err)
 	}
-	var nf struct {
-		movies, shows, episodes []simklIDs
-	}
-	for _, e := range pr.NotFound.Movies {
-		nf.movies = append(nf.movies, e.IDs)
-	}
-	for _, e := range pr.NotFound.Shows {
-		nf.shows = append(nf.shows, e.IDs)
-	}
-	for _, e := range pr.NotFound.Episodes {
-		nf.episodes = append(nf.episodes, e.IDs)
-	}
 	var kept []model.WatchItem
 	for _, it := range delivered {
 		// Match within the item's own category only: ID spaces (notably
 		// TMDB movie vs TV) collide across types, so a not_found episode
 		// must never drop a delivered movie.
-		var list []simklIDs
+		var list []notFoundEntry
 		switch it.MediaType {
 		case "movie":
-			list = nf.movies
+			list = pr.NotFound.Movies
 		case "show":
-			list = nf.shows
+			list = pr.NotFound.Shows
 		default:
-			list = nf.episodes
+			list = pr.NotFound.Episodes
 		}
 		if !unresolved(it.IDs, list) {
 			kept = append(kept, it)
@@ -428,8 +397,9 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 
 // unresolved reports whether ids match a not_found entry on any shared
 // non-zero identifier; absent not_found lists match nothing.
-func unresolved(ids model.IDs, nfs []simklIDs) bool {
-	for _, nf := range nfs {
+func unresolved(ids model.IDs, nfs []notFoundEntry) bool {
+	for _, e := range nfs {
+		nf := e.IDs
 		if nf.Simkl != 0 && nf.Simkl == ids.Simkl {
 			return true
 		}
