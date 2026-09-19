@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS seen_items;
+DROP TABLE IF EXISTS sync_state;

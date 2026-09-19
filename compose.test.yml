@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: watchmesh
+      POSTGRES_PASSWORD: watchmesh
+      POSTGRES_DB: watchmesh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watchmesh -d watchmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  tester:
+    image: golang:1.27.1-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+    command: go test ./... -count=1
+    environment:
+      # Same ephemeral database: the store suite drops/re-migrates tables,
+      # so it requires isolated TEST_DATABASE_URL.
+      TEST_DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    command: serve
+    environment:
+      DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
+      WATCHMESH_CONFIG: /config/config.json
+    volumes:
+      # Operator config: copy config.example.json to config.json and edit.
+      - ./config.json:/config/config.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: watchmesh
+      POSTGRES_PASSWORD: watchmesh
+      POSTGRES_DB: watchmesh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watchmesh -d watchmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

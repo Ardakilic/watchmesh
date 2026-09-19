@@ -1,0 +1,42 @@
+{
+  "interval": "15m",
+  "database_url": "env:DATABASE_URL",
+  "connections": {
+    "trakt_main": {
+      "type": "trakt",
+      "client_id": "env:TRAKT_ID",
+      "client_secret": "env:TRAKT_SECRET"
+    },
+    "trakt_alt": {
+      "type": "trakt",
+      "client_id": "env:TRAKT2_ID",
+      "client_secret": "env:TRAKT2_SECRET"
+    },
+    "simkl_main": {
+      "type": "simkl",
+      "client_id": "env:SIMKL_ID"
+    },
+    "ryot_self": {
+      "type": "ryot",
+      "base_url": "env:RYOT_URL",
+      "token": "env:RYOT_TOKEN"
+    },
+    "yam_self": {
+      "type": "yamtrack",
+      "base_url": "env:YAM_URL",
+      "token": "env:YAM_TOKEN"
+    }
+  },
+  "syncs": [
+    {
+      "name": "main-mesh",
+      "source": "trakt_main",
+      "targets": ["simkl_main", "ryot_self", "yam_self"]
+    },
+    {
+      "name": "alt-mesh",
+      "source": "trakt_alt",
+      "targets": ["simkl_main"]
+    }
+  ]
+}
