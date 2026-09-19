@@ -24,7 +24,7 @@ THEN the cursor MUST advance to the window-end captured before History.
 
 #### Scenario: MarkSeen failure counts as target failure
 WHEN target A's Push succeeds but any of its `MarkSeen` writes fails
-THEN A MUST count as failed for cursor purposes and its items MUST be re-pushed on the next run.
+THEN A MUST count as failed for cursor purposes; rows for its successfully-written items MUST persist, and only items whose `MarkSeen` writes failed MUST be re-pushed on the next run (writes are independent, not transactional).
 
 ## ADDED Requirements
 

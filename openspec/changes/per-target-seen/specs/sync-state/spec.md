@@ -12,11 +12,15 @@ WHEN `Seen` is checked for target B on a hash only target A delivered
 THEN it MUST return false.
 
 ### Requirement: Success upsert
-State SHALL record a `(sync_name, target, item_hash)` row only after that target reports delivery, and SHALL leave a failed target's rows unchanged.
+State SHALL record a `(sync_name, target, item_hash)` row only for items that target reports delivered — including partial deliveries returned alongside a Push error — and SHALL leave no rows for items never reported delivered. Writes are independent, not transactional.
 
 #### Scenario: Failed target writes nothing
-WHEN target B's push fails while A and C succeed
+WHEN target B's push fails with no delivered items while A and C succeed
 THEN rows for A and C MUST be written and no row for B MUST appear.
+
+#### Scenario: Partial delivery records what arrived
+WHEN target B's push fails but reports delivered items alongside the error
+THEN rows for those delivered items MUST be written while undelivered items leave no rows, and the cursor MUST stay held.
 
 #### Scenario: Empty window writes nothing
 WHEN no fresh items exist for any target
