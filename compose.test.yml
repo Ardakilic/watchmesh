@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: watchmesh
+      POSTGRES_PASSWORD: watchmesh
+      POSTGRES_DB: watchmesh
+  tester:
+    image: golang:1.24.13-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+    command: go test ./... -count=1
+    environment:
+      DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
+    depends_on:
+      - postgres

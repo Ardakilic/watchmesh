@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    command: serve
+    environment:
+      DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
+      CONFIG_PATH: /config/config.json
+    depends_on:
+      - postgres
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: watchmesh
+      POSTGRES_PASSWORD: watchmesh
+      POSTGRES_DB: watchmesh
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
