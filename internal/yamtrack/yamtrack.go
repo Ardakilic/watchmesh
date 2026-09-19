@@ -116,9 +116,16 @@ func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Reque
 		return resp, nil
 	}
 	secs := 1
-	if ra := resp.Header.Get("Retry-After"); ra != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(ra)); err == nil && n >= 0 {
+	if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
+		if n, err := strconv.Atoi(ra); err == nil && n >= 0 {
 			secs = n
+		} else if t, err := http.ParseTime(ra); err == nil {
+			// ponytail: HTTP-date form; past dates fall to 0 (immediate retry)
+			if d := time.Until(t); d > 0 {
+				secs = int(d/time.Second) + 1
+			} else {
+				secs = 0
+			}
 		}
 	}
 	resp.Body.Close()

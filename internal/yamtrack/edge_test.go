@@ -192,6 +192,67 @@ func TestPushRetry429(t *testing.T) {
 	}
 }
 
+// TestPushRetryHTTPDate verifies an HTTP-date Retry-After is honored (future
+// waits, past retries immediately) instead of falling back to 1s.
+func TestPushRetryHTTPDate(t *testing.T) {
+	ctx := context.Background()
+	newItem := func() []model.WatchItem {
+		return []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
+	}
+	serve := func(date string) (*httptest.Server, *int) {
+		n := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n++
+			if n == 1 {
+				w.Header().Set("Retry-After", date)
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			fmt.Fprint(w, `{}`)
+		}))
+		return srv, &n
+	}
+	srv, n := serve(time.Now().Add(500 * time.Millisecond).UTC().Format(http.TimeFormat))
+	defer srv.Close()
+	start := time.Now()
+	if delivered, err := New(srv.URL, "t").Push(ctx, newItem()); err != nil || len(delivered) != 1 || *n != 2 {
+		t.Fatalf("future date: delivered=%d err=%v requests=%d", len(delivered), err, *n)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("future date: took %v, want prompt retry", d)
+	}
+	srv2, n2 := serve(time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat))
+	defer srv2.Close()
+	start = time.Now()
+	if delivered, err := New(srv2.URL, "t").Push(ctx, newItem()); err != nil || len(delivered) != 1 || *n2 != 2 {
+		t.Fatalf("past date: delivered=%d err=%v requests=%d", len(delivered), err, *n2)
+	}
+	if d := time.Since(start); d > 900*time.Millisecond {
+		t.Fatalf("past date: took %v, want immediate retry", d)
+	}
+}
+
+// TestPushRetryCancel verifies cancelling during the retry wait aborts Push
+// promptly with the context error and nothing delivered.
+func TestPushRetryCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	time.AfterFunc(100*time.Millisecond, cancel)
+	start := time.Now()
+	it := []model.WatchItem{{IDs: model.IDs{TMDB: 1}, MediaType: "movie", WatchedAt: time.Now()}}
+	delivered, err := New(srv.URL, "t").Push(ctx, it)
+	if err != context.Canceled || len(delivered) != 0 {
+		t.Fatalf("cancel: delivered=%d err=%v, want ctx canceled and nothing", len(delivered), err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("cancel: took %v, want prompt abort", d)
+	}
+}
+
 // TestValidateTokenTransportErrors verifies request build/Do failures surface.
 func TestValidateTokenTransportErrors(t *testing.T) {
 	ctx := context.Background()

@@ -20,6 +20,7 @@ flowchart LR
 ```sh
 cp config.example.json config.json        # edit connections + syncs
 cp .env.example .env                      # fill dummy values with real ones
+set -a; . ./.env; set +a                  # export .env for the go run commands below
 export DATABASE_URL=postgres://watchmesh:watchmesh@localhost:5432/watchmesh?sslmode=disable
 make dev                                  # compose: postgres + serve
 go run ./cmd/watchmesh auth --config config.json --connection trakt_main
