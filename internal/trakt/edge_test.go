@@ -238,6 +238,7 @@ func TestPushNotFound(t *testing.T) {
 	}
 }
 
+// TestPushEdges verifies zero WatchedAt skips and transport failures surface.
 func TestPushEdges(t *testing.T) {
 	ctx := context.Background()
 	// Zero WatchedAt is skipped, never stamped with a fabricated date.
