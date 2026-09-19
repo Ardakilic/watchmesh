@@ -28,17 +28,19 @@ func TestPushNotFound(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now()
 	items := []model.WatchItem{
-		{IDs: model.IDs{Simkl: 1}, MediaType: "movie", WatchedAt: at},
+		{IDs: model.IDs{Simkl: 1, TMDB: 100}, MediaType: "movie", WatchedAt: at},
 		{IDs: model.IDs{Simkl: 2}, MediaType: "movie", WatchedAt: at},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"not_found":{"movies":[{"ids":{"simkl":2}}]}}`)
+		fmt.Fprint(w, `{"not_found":{"movies":[{"ids":{"simkl":2}}],"episodes":[{"ids":{"tmdb":100}}]}}`)
 	}))
 	defer srv.Close()
 	delivered, err := New(srv.URL, "c", "t").Push(ctx, items)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// simkl:2 drops (same-category); the cross-category tmdb:100 episode
+	// entry must not drop the movie.
 	if len(delivered) != 1 || delivered[0].IDs.Simkl != 1 {
 		t.Fatalf("delivered=%+v want only simkl:1", delivered)
 	}

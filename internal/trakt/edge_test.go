@@ -218,12 +218,12 @@ func TestFetchKindEdges(t *testing.T) {
 func TestPushNotFound(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"added":{},"not_found":{"movies":[{"ids":{"trakt":2}}],"episodes":[{"ids":{"tmdb":999}}]}}`)
+		fmt.Fprint(w, `{"added":{},"not_found":{"movies":[{"ids":{"trakt":2}}],"shows":[{"ids":{"trakt":1}}],"episodes":[{"ids":{"tmdb":999}},{"ids":{"tmdb":603}}]}}`)
 	}))
 	defer srv.Close()
 	at := time.Now()
 	items := []model.WatchItem{
-		{IDs: model.IDs{Trakt: 1}, MediaType: "movie", WatchedAt: at},
+		{IDs: model.IDs{Trakt: 1, TMDB: 603}, MediaType: "movie", WatchedAt: at},
 		{IDs: model.IDs{Trakt: 2}, MediaType: "movie", WatchedAt: at},
 		{IDs: model.IDs{Trakt: 3, TMDB: 999}, MediaType: "episode", WatchedAt: at},
 	}
@@ -231,6 +231,8 @@ func TestPushNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// trakt:2 (same-category match) and tmdb:999 (same-category match) drop;
+	// cross-category tmdb:603/trakt:1 entries must not drop the movie.
 	if len(delivered) != 1 || delivered[0].IDs.Trakt != 1 {
 		t.Fatalf("delivered=%+v want only trakt:1", delivered)
 	}

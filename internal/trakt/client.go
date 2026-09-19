@@ -313,25 +313,29 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 	var pr struct {
 		NotFound struct {
 			Movies   []notFoundEntry `json:"movies"`
-			Shows    []notFoundEntry `json:"shows"`
-			Seasons  []notFoundEntry `json:"seasons"`
 			Episodes []notFoundEntry `json:"episodes"`
 		} `json:"not_found"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 		return nil, fmt.Errorf("trakt push: malformed response: %w", err)
 	}
-	var nf []traktIDs
-	for _, l := range [][]notFoundEntry{
-		pr.NotFound.Movies, pr.NotFound.Shows, pr.NotFound.Seasons, pr.NotFound.Episodes,
-	} {
-		for _, e := range l {
-			nf = append(nf, e.IDs)
-		}
+	var moviesNF, episodesNF []traktIDs
+	for _, e := range pr.NotFound.Movies {
+		moviesNF = append(moviesNF, e.IDs)
+	}
+	for _, e := range pr.NotFound.Episodes {
+		episodesNF = append(episodesNF, e.IDs)
 	}
 	var kept []model.WatchItem
 	for _, it := range delivered {
-		if !unresolved(it.IDs, nf) {
+		// Match within the item's own category only: ID spaces (notably
+		// TMDB movie vs TV) collide across types, so a not_found episode
+		// must never drop a delivered movie.
+		list := episodesNF
+		if it.MediaType == "movie" {
+			list = moviesNF
+		}
+		if !unresolved(it.IDs, list) {
 			kept = append(kept, it)
 		}
 	}
