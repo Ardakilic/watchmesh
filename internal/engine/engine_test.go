@@ -30,6 +30,9 @@ type fakeTarget struct {
 	// drop, when non-nil, simulates a target that skips items: dropped
 	// items are omitted from the delivered set.
 	drop func(model.WatchItem) bool
+	// partial, when non-nil, is returned alongside err to simulate a
+	// mid-loop failure after real deliveries.
+	partial []model.WatchItem
 }
 
 // Name returns the fake connection name.
@@ -40,7 +43,7 @@ func (f *fakeTarget) Name() string { return f.name }
 func (f *fakeTarget) Push(_ context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	f.pushes = append(f.pushes, items)
 	if f.err != nil {
-		return nil, f.err
+		return f.partial, f.err
 	}
 	if f.drop == nil {
 		return items, nil
@@ -160,6 +163,41 @@ func TestSyncMarksOnlyDelivered(t *testing.T) {
 	}
 	if seen, _ := st.Seen(ctx, "s", "t", skipped.Hash()); seen {
 		t.Fatal("skipped item must not be marked seen")
+	}
+}
+
+// TestSyncPartialDeliveryMarked verifies a mid-loop failure still records
+// what was delivered: the delivered hash marks, the remainder stays unseen,
+// the cursor holds, and the rerun pushes only the remainder.
+func TestSyncPartialDeliveryMarked(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
+	first, rest := item(1, at), item(2, at)
+	src := &fakeSource{items: []model.WatchItem{first, rest}}
+	tg := &fakeTarget{name: "t", err: errors.New("boom"), partial: []model.WatchItem{first}}
+	st := newMemStore()
+
+	if err := Sync(ctx, "s", src, []Target{tg}, st); err == nil {
+		t.Fatal("expected combined error")
+	}
+	if seen, _ := st.Seen(ctx, "s", "t", first.Hash()); !seen {
+		t.Fatal("delivered-before-error item must be marked seen")
+	}
+	if seen, _ := st.Seen(ctx, "s", "t", rest.Hash()); seen {
+		t.Fatal("undelivered item must stay unseen")
+	}
+	if st.setRuns != 0 {
+		t.Fatal("cursor must hold on incomplete delivery")
+	}
+	tg.err, tg.partial, tg.pushes = nil, nil, nil
+	if err := Sync(ctx, "s", src, []Target{tg}, st); err != nil {
+		t.Fatalf("rerun Sync: %v", err)
+	}
+	if len(tg.pushes) != 1 || len(tg.pushes[0]) != 1 || tg.pushes[0][0].Hash() != rest.Hash() {
+		t.Fatalf("rerun must push only the remainder, got %+v", tg.pushes)
+	}
+	if st.setRuns != 1 {
+		t.Fatal("cursor advances once delivery completes")
 	}
 }
 

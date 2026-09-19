@@ -59,6 +59,29 @@ func TestPush(t *testing.T) {
 	}
 }
 
+// TestPushPartialDelivery verifies items sent before a mid-loop failure
+// are returned alongside the error instead of discarded.
+func TestPushPartialDelivery(t *testing.T) {
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 2 {
+			w.WriteHeader(500)
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{}}`)
+	}))
+	defer srv.Close()
+	delivered, err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{item(1), item(2)})
+	if err == nil {
+		t.Fatal("second-item failure must surface")
+	}
+	if len(delivered) != 1 {
+		t.Fatalf("delivered=%d want 1", len(delivered))
+	}
+}
+
 // TestPushSkipsNoTMDB verifies TMDB==0 items send no requests.
 func TestPushSkipsNoTMDB(t *testing.T) {
 	n := 0

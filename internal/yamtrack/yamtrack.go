@@ -72,7 +72,8 @@ func endDate(w model.WatchItem) string {
 
 // Push loops single POST per item, no batch call, and returns the items
 // actually delivered. TMDB==0 items and unknown kinds are omitted from
-// delivered so the engine never marks them.
+// delivered so the engine never marks them; items delivered before a
+// mid-loop failure are returned alongside the error.
 // Candidate body (STUB): {source:tmdb, media_type, media_id, status, end_date}.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	var delivered []model.WatchItem
@@ -93,7 +94,7 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 		})
 		// STUB: POST vs PATCH per-item confirmed live in task 6.3; POST default.
 		if err := c.pushOne(ctx, kind, body); err != nil {
-			return nil, err
+			return delivered, err
 		}
 		delivered = append(delivered, it)
 	}

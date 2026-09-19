@@ -85,6 +85,7 @@ type gqlResp struct {
 // Push sends one GraphQL mutation per item and returns the items actually
 // delivered; TMDB==0 items and episodes are skipped (no episode-capable
 // payload yet) and omitted from delivered, so the engine never marks them.
+// Items delivered before a mid-loop failure are returned alongside the error.
 // Candidate mutation (STUB): mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	var delivered []model.WatchItem
@@ -94,7 +95,7 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 			continue
 		}
 		if err := c.pushOne(ctx, it, mid); err != nil {
-			return nil, err
+			return delivered, err
 		}
 		delivered = append(delivered, it)
 	}

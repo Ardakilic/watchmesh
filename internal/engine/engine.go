@@ -20,7 +20,8 @@ type Source interface {
 // type, since two connections may share one type. Push returns the subset of
 // items actually delivered, so the engine marks seen only what reached the
 // service; skipped items (unsupported type, missing IDs, zero timestamp) are
-// reported by omission, never silently marked.
+// reported by omission, never silently marked. Per-item connectors also
+// return items delivered before a mid-loop failure alongside the error.
 type Target interface {
 	Name() string
 	Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error)
@@ -38,7 +39,9 @@ type Store interface {
 // Each target is diffed against its own seen rows (keyed by connection name)
 // and gets only its missing items; targets with nothing missing get no Push
 // and count as succeeded. Only items in Push's delivered set are marked seen,
-// so a target that skips an item never records it as delivered. SetLastRun
+// so a target that skips an item never records it as delivered; partial
+// deliveries returned alongside an error are still marked, while the cursor
+// stays held so the rerun covers exactly the missing remainder. SetLastRun
 // advances to the window-end captured before History iff every target fully
 // succeeded (Push plus all MarkSeen writes); a held cursor plus per-target
 // diffs makes reruns push only to still-missing targets. A window with
@@ -78,7 +81,6 @@ func Sync(ctx context.Context, syncName string, src Source, targets []Target, st
 		if err != nil {
 			errs = append(errs, fmt.Errorf("target %d: %w", i, err))
 			allOK = false
-			continue
 		}
 		markOK := true
 		for _, it := range delivered {
