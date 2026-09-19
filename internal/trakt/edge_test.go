@@ -214,6 +214,28 @@ func TestFetchKindEdges(t *testing.T) {
 }
 
 // TestPushEdges verifies zero WatchedAt skips and transport failures surface.
+// TestPushNotFound verifies not_found IDs are omitted from delivered.
+func TestPushNotFound(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"added":{},"not_found":{"movies":[{"ids":{"trakt":2}}],"episodes":[{"ids":{"tmdb":999}}]}}`)
+	}))
+	defer srv.Close()
+	at := time.Now()
+	items := []model.WatchItem{
+		{IDs: model.IDs{Trakt: 1}, MediaType: "movie", WatchedAt: at},
+		{IDs: model.IDs{Trakt: 2}, MediaType: "movie", WatchedAt: at},
+		{IDs: model.IDs{Trakt: 3, TMDB: 999}, MediaType: "episode", WatchedAt: at},
+	}
+	delivered, err := New(srv.URL, "c", "s", "t").Push(ctx, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(delivered) != 1 || delivered[0].IDs.Trakt != 1 {
+		t.Fatalf("delivered=%+v want only trakt:1", delivered)
+	}
+}
+
 func TestPushEdges(t *testing.T) {
 	ctx := context.Background()
 	// Zero WatchedAt is skipped, never stamped with a fabricated date.

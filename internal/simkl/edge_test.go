@@ -22,6 +22,40 @@ func closedURL(t *testing.T) string {
 	return url
 }
 
+// TestPushNotFound verifies not_found IDs are omitted from delivered,
+// and an absent not_found section leaves delivered unchanged.
+func TestPushNotFound(t *testing.T) {
+	ctx := context.Background()
+	at := time.Now()
+	items := []model.WatchItem{
+		{IDs: model.IDs{Simkl: 1}, MediaType: "movie", WatchedAt: at},
+		{IDs: model.IDs{Simkl: 2}, MediaType: "movie", WatchedAt: at},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"not_found":{"movies":[{"ids":{"simkl":2}}]}}`)
+	}))
+	defer srv.Close()
+	delivered, err := New(srv.URL, "c", "t").Push(ctx, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(delivered) != 1 || delivered[0].IDs.Simkl != 1 {
+		t.Fatalf("delivered=%+v want only simkl:1", delivered)
+	}
+
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{}`)
+	}))
+	defer plain.Close()
+	delivered, err = New(plain.URL, "c", "t").Push(ctx, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(delivered) != 2 {
+		t.Fatalf("delivered=%d want 2 without not_found", len(delivered))
+	}
+}
+
 // TestNameAndHTTPClient verifies Name and the nil/custom HTTP selection.
 func TestNameAndHTTPClient(t *testing.T) {
 	if New("http://x", "c", "t").Name() != "simkl" {

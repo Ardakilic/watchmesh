@@ -96,6 +96,11 @@ type traktIDs struct {
 	TVDB  int    `json:"tvdb,omitempty"`
 }
 
+// notFoundEntry is one unresolved element in a push response.
+type notFoundEntry struct {
+	IDs traktIDs `json:"ids"`
+}
+
 // movieEntry is one /sync/history/movies element.
 type movieEntry struct {
 	WatchedAt string `json:"watched_at"`
@@ -266,7 +271,8 @@ func pushID(ids model.IDs) pushIDs {
 // Push POSTs /sync/history grouping movies/episodes per design §7 and
 // returns the items actually delivered. Media types other than
 // movie/episode and items with zero WatchedAt are skipped (stamping
-// time.Now() would fabricate history) and omitted from delivered, so the
+// time.Now() would fabricate history) and omitted from delivered, as are
+// items the service reports under not_found (unresolved IDs), so the
 // engine never marks them seen.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	body := struct {
@@ -304,9 +310,50 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("trakt push: status %d", resp.StatusCode)
 	}
-	var v json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+	var pr struct {
+		NotFound struct {
+			Movies   []notFoundEntry `json:"movies"`
+			Shows    []notFoundEntry `json:"shows"`
+			Seasons  []notFoundEntry `json:"seasons"`
+			Episodes []notFoundEntry `json:"episodes"`
+		} `json:"not_found"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 		return nil, fmt.Errorf("trakt push: malformed response: %w", err)
 	}
-	return delivered, nil
+	var nf []traktIDs
+	for _, l := range [][]notFoundEntry{
+		pr.NotFound.Movies, pr.NotFound.Shows, pr.NotFound.Seasons, pr.NotFound.Episodes,
+	} {
+		for _, e := range l {
+			nf = append(nf, e.IDs)
+		}
+	}
+	var kept []model.WatchItem
+	for _, it := range delivered {
+		if !unresolved(it.IDs, nf) {
+			kept = append(kept, it)
+		}
+	}
+	return kept, nil
+}
+
+// unresolved reports whether ids match a not_found entry on any shared
+// non-zero identifier; absent not_found lists match nothing.
+func unresolved(ids model.IDs, nfs []traktIDs) bool {
+	for _, nf := range nfs {
+		if nf.Trakt != 0 && nf.Trakt == ids.Trakt {
+			return true
+		}
+		if nf.IMDB != "" && nf.IMDB == ids.IMDB {
+			return true
+		}
+		if nf.TMDB != 0 && nf.TMDB == ids.TMDB {
+			return true
+		}
+		if nf.TVDB != 0 && nf.TVDB == ids.TVDB {
+			return true
+		}
+	}
+	return false
 }

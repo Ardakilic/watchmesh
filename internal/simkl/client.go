@@ -167,6 +167,11 @@ type simklIDs struct {
 	TVDB  int    `json:"tvdb,omitempty"`
 }
 
+// notFoundEntry is one unresolved element in a push response.
+type notFoundEntry struct {
+	IDs simklIDs `json:"ids"`
+}
+
 // movieItem is one movies element from /sync/all-items/movies.
 type movieItem struct {
 	Title       string   `json:"title"`
@@ -326,8 +331,10 @@ type pushShow struct {
 }
 
 // Push POSTs /sync/history per design §7 at 1 POST/s and returns the items
-// actually delivered; unknown media types are omitted from delivered so the
-// engine never marks them seen.
+// actually delivered; unknown media types and items the service reports
+// under not_found (unresolved IDs) are omitted from delivered so the
+// engine never marks them seen. An absent not_found section leaves
+// delivered unchanged.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.WatchItem, error) {
 	body := struct {
 		Movies []pushMovie `json:"movies"`
@@ -376,9 +383,49 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("simkl push: status %d", resp.StatusCode)
 	}
-	var v json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+	var pr struct {
+		NotFound struct {
+			Movies   []notFoundEntry `json:"movies"`
+			Shows    []notFoundEntry `json:"shows"`
+			Episodes []notFoundEntry `json:"episodes"`
+		} `json:"not_found"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 		return nil, fmt.Errorf("simkl push: malformed response: %w", err)
 	}
-	return delivered, nil
+	var nf []simklIDs
+	for _, l := range [][]notFoundEntry{
+		pr.NotFound.Movies, pr.NotFound.Shows, pr.NotFound.Episodes,
+	} {
+		for _, e := range l {
+			nf = append(nf, e.IDs)
+		}
+	}
+	var kept []model.WatchItem
+	for _, it := range delivered {
+		if !unresolved(it.IDs, nf) {
+			kept = append(kept, it)
+		}
+	}
+	return kept, nil
+}
+
+// unresolved reports whether ids match a not_found entry on any shared
+// non-zero identifier; absent not_found lists match nothing.
+func unresolved(ids model.IDs, nfs []simklIDs) bool {
+	for _, nf := range nfs {
+		if nf.Simkl != 0 && nf.Simkl == ids.Simkl {
+			return true
+		}
+		if nf.IMDB != "" && nf.IMDB == ids.IMDB {
+			return true
+		}
+		if nf.TMDB != 0 && nf.TMDB == ids.TMDB {
+			return true
+		}
+		if nf.TVDB != 0 && nf.TVDB == ids.TVDB {
+			return true
+		}
+	}
+	return false
 }
