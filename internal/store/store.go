@@ -56,11 +56,13 @@ func (s *Store) SetLastRun(ctx context.Context, syncName string, t time.Time) er
 	return err
 }
 
-// Seen reports whether hash was already synced for sync.
-func (s *Store) Seen(ctx context.Context, syncName, hash string) (bool, error) {
+// Seen reports whether hash was already delivered to target for sync.
+// target is the connection name (e.g. "simkl_main"), never the connector
+// type; backfilled 000002 rows carry an empty target and never match.
+func (s *Store) Seen(ctx context.Context, syncName, target, hash string) (bool, error) {
 	var one int
 	err := s.pool.QueryRow(ctx,
-		`SELECT 1 FROM seen_items WHERE sync_name=$1 AND item_hash=$2`, syncName, hash).Scan(&one)
+		`SELECT 1 FROM seen_items WHERE sync_name=$1 AND target=$2 AND item_hash=$3`, syncName, target, hash).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -70,11 +72,12 @@ func (s *Store) Seen(ctx context.Context, syncName, hash string) (bool, error) {
 	return true, nil
 }
 
-// MarkSeen records hash as synced (idempotent upsert).
-func (s *Store) MarkSeen(ctx context.Context, syncName, hash string, watchedAt time.Time) error {
+// MarkSeen records hash as delivered to target (idempotent upsert).
+// target is the connection name (e.g. "simkl_main"), never the connector type.
+func (s *Store) MarkSeen(ctx context.Context, syncName, target, hash string, watchedAt time.Time) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO seen_items(sync_name,item_hash,watched_at) VALUES($1,$2,$3)
-		 ON CONFLICT(sync_name,item_hash) DO NOTHING`,
-		syncName, hash, watchedAt)
+		`INSERT INTO seen_items(sync_name,target,item_hash,watched_at) VALUES($1,$2,$3,$4)
+		 ON CONFLICT(sync_name,target,item_hash) DO NOTHING`,
+		syncName, target, hash, watchedAt)
 	return err
 }

@@ -27,23 +27,23 @@ func (f *failStore) LastRun(context.Context, string) (time.Time, error) {
 }
 
 // Seen returns the scripted seen state or seenErr.
-func (f *failStore) Seen(_ context.Context, sync, hash string) (bool, error) {
+func (f *failStore) Seen(_ context.Context, sync, target, hash string) (bool, error) {
 	if f.seenErr != nil {
 		return false, f.seenErr
 	}
-	_, ok := f.seen[sync+"\x00"+hash]
+	_, ok := f.seen[sync+"\x00"+target+"\x00"+hash]
 	return ok, nil
 }
 
 // MarkSeen records the hash or returns markErr.
-func (f *failStore) MarkSeen(_ context.Context, sync, hash string, at time.Time) error {
+func (f *failStore) MarkSeen(_ context.Context, sync, target, hash string, at time.Time) error {
 	if f.markErr != nil {
 		return f.markErr
 	}
 	if f.seen == nil {
 		f.seen = map[string]time.Time{}
 	}
-	f.seen[sync+"\x00"+hash] = at
+	f.seen[sync+"\x00"+target+"\x00"+hash] = at
 	return nil
 }
 

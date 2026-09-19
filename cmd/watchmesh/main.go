@@ -55,21 +55,33 @@ func run(args []string) error {
 	}
 }
 
-// wire maps one connection to its Source+Target (same instance).
-func wire(c config.Connection) (engine.Source, engine.Target, error) {
+// namedTarget carries the connection name so per-target seen keys stay
+// distinct when two connections share one connector type (trakt_main vs
+// trakt_alt both report Name() == "trakt").
+type namedTarget struct {
+	engine.Target
+	name string
+}
+
+// Name returns the connection name from config.
+func (n namedTarget) Name() string { return n.name }
+
+// wire maps one named connection to its Source+Target (same instance); the
+// target is wrapped so Name reports the connection name, not the type.
+func wire(name string, c config.Connection) (engine.Source, engine.Target, error) {
 	switch c.Type {
 	case "trakt":
 		cl := trakt.New("", c.ClientID, c.ClientSecret, c.Token)
-		return cl, cl, nil
+		return cl, namedTarget{cl, name}, nil
 	case "simkl":
 		cl := simkl.New("", c.ClientID, c.Token)
-		return cl, cl, nil
+		return cl, namedTarget{cl, name}, nil
 	case "ryot":
 		cl := ryot.New(c.BaseURL, c.Token)
-		return cl, cl, nil
+		return cl, namedTarget{cl, name}, nil
 	case "yamtrack":
 		cl := yamtrack.New(c.BaseURL, c.Token)
-		return cl, cl, nil
+		return cl, namedTarget{cl, name}, nil
 	default:
 		return nil, nil, fmt.Errorf("unknown connection type %q", c.Type)
 	}
@@ -110,7 +122,7 @@ func runOne(ctx context.Context, cfg *config.Config, st *store.Store, name strin
 	if !ok {
 		return fmt.Errorf("sync %q: unknown source %q", def.Name, def.Source)
 	}
-	src, _, err := wire(srcConn)
+	src, _, err := wire(def.Source, srcConn)
 	if err != nil {
 		return fmt.Errorf("sync %q: %w", def.Name, err)
 	}
@@ -120,7 +132,7 @@ func runOne(ctx context.Context, cfg *config.Config, st *store.Store, name strin
 		if !ok {
 			return fmt.Errorf("sync %q: unknown target %q", def.Name, tn)
 		}
-		_, tgt, err := wire(tc)
+		_, tgt, err := wire(tn, tc)
 		if err != nil {
 			return fmt.Errorf("sync %q: %w", def.Name, err)
 		}
