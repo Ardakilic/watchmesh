@@ -550,3 +550,69 @@ func TestFetchExcludesZeroTimestamps(t *testing.T) {
 		t.Fatalf("shows got=%v want empty", got)
 	}
 }
+
+// TestRequestPINEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
+func TestRequestPINEmptyBaseFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Client{ClientID: "cid"}
+	if _, err := c.RequestPIN(ctx); err == nil {
+		t.Fatal("empty base with cancelled ctx must fail after fallback")
+	}
+}
+
+// TestPollPINTokenEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
+func TestPollPINTokenEmptyBaseFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Client{ClientID: "cid"}
+	if _, err := c.PollPINToken(ctx, "PIN", 0); err == nil {
+		t.Fatal("empty base with cancelled ctx must fail after fallback")
+	}
+}
+
+// TestUnresolvedIDMatches verifies each ID kind matches its not_found entry.
+func TestUnresolvedIDMatches(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		ids  model.IDs
+		nf   notFoundEntry
+		want bool
+	}{
+		{"simkl", model.IDs{Simkl: 7}, notFoundEntry{IDs: simklIDs{Simkl: 7}}, true},
+		{"imdb", model.IDs{IMDB: "tt123"}, notFoundEntry{IDs: simklIDs{IMDB: "tt123"}}, true},
+		{"tmdb", model.IDs{TMDB: 603}, notFoundEntry{IDs: simklIDs{TMDB: 603}}, true},
+		{"tvdb", model.IDs{TVDB: 888}, notFoundEntry{IDs: simklIDs{TVDB: 888}}, true},
+		{"mismatch", model.IDs{Simkl: 1}, notFoundEntry{IDs: simklIDs{Simkl: 2}}, false},
+		{"empty", model.IDs{Simkl: 1}, notFoundEntry{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unresolved(tt.ids, []notFoundEntry{tt.nf}); got != tt.want {
+				t.Fatalf("got %v want %v", got, tt.want)
+			}
+		})
+	}
+	if unresolved(model.IDs{Simkl: 1}, nil) {
+		t.Fatal("nil list must not match")
+	}
+}
+
+// TestFetchCategoryShowMovieFallback verifies empty show title falls back to movie object.
+func TestFetchCategoryShowMovieFallback(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/watching") {
+			fmt.Fprint(w, `{"shows":[]}`)
+			return
+		}
+		fmt.Fprint(w, `{"shows":[{"status":"completed","last_watched_at":"2026-05-13T19:00:00Z","show":{"title":"","ids":{"simkl":0}},"movie":{"title":"Fallback","year":2020,"ids":{"simkl":99}},"seasons":[{"number":1,"episodes":[{"number":2,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "c", "t").fetchCategory(ctx, "shows", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "Fallback" || got[0].IDs.Simkl != 99 {
+		t.Fatalf("got=%+v want Fallback movie fallback", got)
+	}
+}

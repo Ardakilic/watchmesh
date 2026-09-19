@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,5 +110,15 @@ func TestValidateSyncNames(t *testing.T) {
 	}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("uniquely named sync must pass: %v", err)
+	}
+}
+
+// TestDefaultWritePathFallback verifies the relative fallback when XDG and HOME are empty.
+func TestDefaultWritePathFallback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	got := DefaultWritePath()
+	if !strings.HasSuffix(got, filepath.Join("watchmesh", "config.json")) {
+		t.Fatalf("got %q want watchmesh/config.json suffix", got)
 	}
 }

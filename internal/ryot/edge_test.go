@@ -2,6 +2,7 @@ package ryot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -218,5 +219,26 @@ func TestValidateTokenTransportErrors(t *testing.T) {
 	}
 	if err := New(closedURL(t), "t").ValidateToken(ctx); err == nil {
 		t.Fatal("closed server must fail")
+	}
+}
+
+// TestDoWithRetrySecondBuildFails verifies a 429 followed by a build error surfaces.
+func TestDoWithRetrySecondBuildFails(t *testing.T) {
+	ctx := context.Background()
+	buildErr := errors.New("boom")
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(429)
+	}))
+	defer srv.Close()
+	if _, err := doWithRetry(ctx, srv.Client(), func() (*http.Request, error) {
+		calls++
+		if calls == 2 {
+			return nil, buildErr
+		}
+		return http.NewRequestWithContext(ctx, "GET", srv.URL+"/x", nil)
+	}); err != buildErr {
+		t.Fatalf("second build err: %v calls=%d", err, calls)
 	}
 }

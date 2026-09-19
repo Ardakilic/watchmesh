@@ -342,3 +342,49 @@ func TestAuthEdges(t *testing.T) {
 		t.Fatal("cancel during sleep must fail")
 	}
 }
+
+// TestRequestDeviceCodeEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
+func TestRequestDeviceCodeEmptyBaseFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Client{ClientID: "cid", ClientSecret: "sec"}
+	if _, err := c.RequestDeviceCode(ctx); err == nil {
+		t.Fatal("empty base with cancelled ctx must fail after fallback")
+	}
+}
+
+// TestPollDeviceTokenEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
+func TestPollDeviceTokenEmptyBaseFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Client{ClientID: "cid", ClientSecret: "sec"}
+	if _, err := c.PollDeviceToken(ctx, "dev", 0); err == nil {
+		t.Fatal("empty base with cancelled ctx must fail after fallback")
+	}
+}
+
+// TestUnresolvedIDMatches verifies each ID kind matches its not_found entry.
+func TestUnresolvedIDMatches(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		ids  model.IDs
+		nf   notFoundEntry
+		want bool
+	}{
+		{"trakt", model.IDs{Trakt: 7}, notFoundEntry{IDs: traktIDs{Trakt: 7}}, true},
+		{"imdb", model.IDs{IMDB: "tt123"}, notFoundEntry{IDs: traktIDs{IMDB: "tt123"}}, true},
+		{"tmdb", model.IDs{TMDB: 603}, notFoundEntry{IDs: traktIDs{TMDB: 603}}, true},
+		{"tvdb", model.IDs{TVDB: 888}, notFoundEntry{IDs: traktIDs{TVDB: 888}}, true},
+		{"mismatch", model.IDs{Trakt: 1}, notFoundEntry{IDs: traktIDs{Trakt: 2}}, false},
+		{"empty", model.IDs{Trakt: 1}, notFoundEntry{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unresolved(tt.ids, []notFoundEntry{tt.nf}); got != tt.want {
+				t.Fatalf("got %v want %v", got, tt.want)
+			}
+		})
+	}
+	if unresolved(model.IDs{Trakt: 1}, nil) {
+		t.Fatal("nil list must not match")
+	}
+}

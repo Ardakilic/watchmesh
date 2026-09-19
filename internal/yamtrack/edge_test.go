@@ -2,6 +2,7 @@ package yamtrack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -261,5 +262,78 @@ func TestValidateTokenTransportErrors(t *testing.T) {
 	}
 	if err := New(closedURL(t), "t").ValidateToken(ctx); err == nil {
 		t.Fatal("closed server must fail")
+	}
+}
+
+// TestDoWithRetrySecondBuildFails verifies a 429 followed by a build error surfaces.
+func TestDoWithRetrySecondBuildFails(t *testing.T) {
+	ctx := context.Background()
+	buildErr := errors.New("boom")
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(429)
+	}))
+	defer srv.Close()
+	if _, err := doWithRetry(ctx, srv.Client(), func() (*http.Request, error) {
+		calls++
+		if calls == 2 {
+			return nil, buildErr
+		}
+		return http.NewRequestWithContext(ctx, "GET", srv.URL+"/x", nil)
+	}); err != buildErr {
+		t.Fatalf("second build err: %v calls=%d", err, calls)
+	}
+}
+
+// TestHistoryFollowsValidNext verifies same-origin next URLs are followed.
+func TestHistoryFollowsValidNext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/media/movie/") {
+			if r.URL.Query().Get("offset") == "0" {
+				fmt.Fprintf(w, `{"results":[{"source":"tmdb","media_type":"movie","media_id":1,"title":"A","end_date":"2026-05-10"}],"next":%q}`, "/api/v1/media/movie/?limit=200&offset=1")
+				return
+			}
+			fmt.Fprint(w, `{"results":[{"source":"tmdb","media_type":"movie","media_id":2,"title":"B","end_date":"2026-05-11"}],"next":null}`)
+			return
+		}
+		fmt.Fprint(w, `{"results":[],"next":null}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "t").History(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].IDs.TMDB != 1 || got[1].IDs.TMDB != 2 {
+		t.Fatalf("got=%v want paged next follow", got)
+	}
+}
+
+// TestHistoryDupNextBreaks verifies repeated continuations stop the loop.
+func TestHistoryDupNextBreaks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/media/movie/") {
+			fmt.Fprint(w, `{"results":[{"source":"tmdb","media_type":"movie","media_id":1,"title":"A","end_date":"2026-05-10"}],"next":"x"}`)
+			return
+		}
+		fmt.Fprint(w, `{"results":[],"next":null}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "t").History(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got=%v want 2 (initial + offset retry, then dup break)", got)
+	}
+}
+
+// TestResolveNextParseErrors verifies unparsable base/next URLs fall back to offset paging.
+func TestResolveNextParseErrors(t *testing.T) {
+	if got := resolveNext("http://[::1", "https://yam.example/api/"); got != "" {
+		t.Fatalf("bad base: got %q want empty", got)
+	}
+	if got := resolveNext("https://yam.example", "https://yam.example/x\x7f"); got != "" {
+		t.Fatalf("bad next: got %q want empty", got)
 	}
 }
