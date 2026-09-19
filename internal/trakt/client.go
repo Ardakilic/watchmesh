@@ -90,7 +90,6 @@ func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Reque
 // traktIDs is the Trakt ids object shared by movie/episode/show entries.
 type traktIDs struct {
 	Trakt int    `json:"trakt,omitempty"`
-	Slug  string `json:"slug,omitempty"`
 	IMDB  string `json:"imdb,omitempty"`
 	TMDB  int    `json:"tmdb,omitempty"`
 	TVDB  int    `json:"tvdb,omitempty"`
@@ -127,11 +126,13 @@ type episodeEntry struct {
 }
 
 // parseTime parses Trakt timestamps; empty/unparseable yields zero time.
+// RFC3339Nano already covers optional fractional seconds, so no extra
+// millis layout is needed.
 func parseTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.000Z"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t
 		}
@@ -249,23 +250,15 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 	return append(movies, episodes...), nil
 }
 
-// pushIDs is the ids object in a /sync/history POST entry.
-type pushIDs struct {
-	Trakt int    `json:"trakt,omitempty"`
-	IMDB  string `json:"imdb,omitempty"`
-	TMDB  int    `json:"tmdb,omitempty"`
-	TVDB  int    `json:"tvdb,omitempty"`
-}
-
 // pushEntry is one movies/episodes element in a /sync/history POST.
 type pushEntry struct {
-	WatchedAt string  `json:"watched_at"`
-	IDs       pushIDs `json:"ids"`
+	WatchedAt string   `json:"watched_at"`
+	IDs       traktIDs `json:"ids"`
 }
 
 // pushID converts model IDs to the push payload ids shape.
-func pushID(ids model.IDs) pushIDs {
-	return pushIDs{Trakt: ids.Trakt, IMDB: ids.IMDB, TMDB: ids.TMDB, TVDB: ids.TVDB}
+func pushID(ids model.IDs) traktIDs {
+	return traktIDs{Trakt: ids.Trakt, IMDB: ids.IMDB, TMDB: ids.TMDB, TVDB: ids.TVDB}
 }
 
 // Push POSTs /sync/history grouping movies/episodes per design §7 and
@@ -319,21 +312,14 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 		return nil, fmt.Errorf("trakt push: malformed response: %w", err)
 	}
-	var moviesNF, episodesNF []traktIDs
-	for _, e := range pr.NotFound.Movies {
-		moviesNF = append(moviesNF, e.IDs)
-	}
-	for _, e := range pr.NotFound.Episodes {
-		episodesNF = append(episodesNF, e.IDs)
-	}
 	var kept []model.WatchItem
 	for _, it := range delivered {
 		// Match within the item's own category only: ID spaces (notably
 		// TMDB movie vs TV) collide across types, so a not_found episode
 		// must never drop a delivered movie.
-		list := episodesNF
+		list := pr.NotFound.Episodes
 		if it.MediaType == "movie" {
-			list = moviesNF
+			list = pr.NotFound.Movies
 		}
 		if !unresolved(it.IDs, list) {
 			kept = append(kept, it)
@@ -344,18 +330,18 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 
 // unresolved reports whether ids match a not_found entry on any shared
 // non-zero identifier; absent not_found lists match nothing.
-func unresolved(ids model.IDs, nfs []traktIDs) bool {
+func unresolved(ids model.IDs, nfs []notFoundEntry) bool {
 	for _, nf := range nfs {
-		if nf.Trakt != 0 && nf.Trakt == ids.Trakt {
+		if nf.IDs.Trakt != 0 && nf.IDs.Trakt == ids.Trakt {
 			return true
 		}
-		if nf.IMDB != "" && nf.IMDB == ids.IMDB {
+		if nf.IDs.IMDB != "" && nf.IDs.IMDB == ids.IMDB {
 			return true
 		}
-		if nf.TMDB != 0 && nf.TMDB == ids.TMDB {
+		if nf.IDs.TMDB != 0 && nf.IDs.TMDB == ids.TMDB {
 			return true
 		}
-		if nf.TVDB != 0 && nf.TVDB == ids.TVDB {
+		if nf.IDs.TVDB != 0 && nf.IDs.TVDB == ids.TVDB {
 			return true
 		}
 	}

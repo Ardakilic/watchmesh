@@ -141,10 +141,17 @@ func runOne(ctx context.Context, cfg *config.Config, st *store.Store, name strin
 	return engine.Sync(ctx, def.Name, src, targets, st)
 }
 
+// baseFlags returns a FlagSet named name with the shared --config flag;
+// each subcommand sets its own Usage and adds its own flags.
+func baseFlags(name string) (*flag.FlagSet, *string) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	configPath := fs.String("config", "", "path to config file")
+	return fs, configPath
+}
+
 // runSync runs one (--sync) or all sync definitions once.
 func runSync(args []string) error {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	configPath := fs.String("config", "", "path to config file")
+	fs, configPath := baseFlags("sync")
 	migPath := fs.String("migrations-path", "", "external migrations dir (file:// override for dev)")
 	syncName := fs.String("sync", "", "sync name to run (empty=all)")
 	fs.Usage = func() {
@@ -189,8 +196,7 @@ func runSync(args []string) error {
 
 // runServe ticks runAll on cfg.Interval until SIGINT/SIGTERM.
 func runServe(args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("config", "", "path to config file")
+	fs, configPath := baseFlags("serve")
 	migPath := fs.String("migrations-path", "", "external migrations dir (file:// override for dev)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: watchmesh serve [--config path] [--migrations-path dir]\n")
@@ -246,9 +252,7 @@ func runAll(ctx context.Context, cfg *config.Config, st *store.Store) {
 
 // runAuth authenticates one --connection: device/PIN flow or token check.
 func runAuth(args []string) error {
-	fs := flag.NewFlagSet("auth", flag.ContinueOnError)
-	configPath := fs.String("config", "", "path to config file")
-	_ = fs.String("migrations-path", "", "external migrations dir (unused for auth)")
+	fs, configPath := baseFlags("auth")
 	connName := fs.String("connection", "", "connection name to authenticate")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: watchmesh auth [--config path] --connection <name>\n")
