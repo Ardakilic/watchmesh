@@ -40,13 +40,18 @@ func (c *Client) httpClient() *http.Client {
 }
 
 // metadataID maps a WatchItem to Ryot's tmdb:// identifier, TMDB-first.
-// Returns ok=false when TMDB==0; callers skip such items.
+// Returns ok=false when TMDB==0 or for episodes: episodes have no
+// episode-capable push payload yet, so callers skip them rather than
+// recording a wrong show-level completion.
 func metadataID(w model.WatchItem) (id string, ok bool) {
 	if w.IDs.TMDB == 0 {
 		return "", false
 	}
+	if w.MediaType == "episode" {
+		return "", false
+	}
 	kind := "movie"
-	if w.MediaType == "show" || w.MediaType == "episode" {
+	if w.MediaType == "show" {
 		kind = "show"
 	}
 	return fmt.Sprintf("tmdb://%s/%d", kind, w.IDs.TMDB), true
@@ -72,7 +77,8 @@ type gqlResp struct {
 	} `json:"errors"`
 }
 
-// Push sends one GraphQL mutation per item; TMDB==0 items are skipped.
+// Push sends one GraphQL mutation per item; TMDB==0 items and episodes are
+// skipped (no episode-capable payload yet).
 // Candidate mutation (STUB): mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 	for _, it := range items {
@@ -80,35 +86,42 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 		if !ok {
 			continue
 		}
-		body, _ := json.Marshal(gqlReq{
-			Query: "mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}",
-			Variables: map[string]any{"i": map[string]any{
-				"metadataId": mid,
-				"state":      "Completed",
-				"finishedOn": finishedOn(it),
-			}},
-		})
-		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/backend/graphql", bytes.NewReader(body))
-		if err != nil {
+		if err := c.pushOne(ctx, it, mid); err != nil {
 			return err
 		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-		resp, err := c.httpClient().Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("ryot push: status %d", resp.StatusCode)
-		}
-		var gr gqlResp
-		if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
-			return fmt.Errorf("ryot push: malformed response: %w", err)
-		}
-		if len(gr.Errors) > 0 {
-			return fmt.Errorf("ryot push: %s", gr.Errors[0].Message)
-		}
+	}
+	return nil
+}
+
+func (c *Client) pushOne(ctx context.Context, it model.WatchItem, mid string) error {
+	body, _ := json.Marshal(gqlReq{
+		Query: "mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}",
+		Variables: map[string]any{"i": map[string]any{
+			"metadataId": mid,
+			"state":      "Completed",
+			"finishedOn": finishedOn(it),
+		}},
+	})
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/backend/graphql", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ryot push: status %d", resp.StatusCode)
+	}
+	var gr gqlResp
+	if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
+		return fmt.Errorf("ryot push: malformed response: %w", err)
+	}
+	if len(gr.Errors) > 0 {
+		return fmt.Errorf("ryot push: %s", gr.Errors[0].Message)
 	}
 	return nil
 }

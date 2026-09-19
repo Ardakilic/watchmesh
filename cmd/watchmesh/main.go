@@ -28,7 +28,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: watchmesh [--config path] [--migrations-path dir] <sync|serve|auth> [flags]")
+	fmt.Fprintln(os.Stderr, "Usage: watchmesh <sync|serve|auth> [flags]")
 	fmt.Fprintln(os.Stderr, "  sync  --sync <name> (empty=all)")
 	fmt.Fprintln(os.Stderr, "  serve (ticker loop)")
 	fmt.Fprintln(os.Stderr, "  auth  --connection <name>")

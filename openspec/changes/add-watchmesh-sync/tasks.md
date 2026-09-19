@@ -30,13 +30,13 @@ Ordered by dependency; each task verifiable in one session.
 
 - [x] 5.1 Implement ryot Push via Bearer POST {url}/backend/graphql ImportCompletedItems mutation (service-connectors) — target-first, TMDB-first ID lookup; verify `go test ./internal/ryot/`.
 - [x] 5.2 Implement ryot History best-effort + token validation GET (service-connectors, app-ops) — history gaps never fail sync; verify `go test ./internal/ryot/ -run TestHistory`.
-- [x] 5.3 Introspect live Ryot GraphQL schema + auth form before finalizing field/enum names (service-connectors) — candidate mutation/inputs in design §7 are stubs; verify against running instance docs/token screen.
+- [ ] 5.3 Introspect live Ryot GraphQL schema + auth form before finalizing field/enum names (service-connectors) — candidate mutation/inputs in design §7 are stubs; verify against running instance docs/token screen.
 
 ## 6. Yamtrack connector
 
 - [x] 6.1 Implement yamtrack History GET /api/v1/media/{type}/ with limit/offset up to 200 following pagination.next (service-connectors) — Bearer or X-API-Key; verify `go test ./internal/yamtrack/`.
 - [x] 6.2 Implement yamtrack Push as looped single POST/PATCH per item, no batch call (service-connectors) — {source:tmdb, media_id} mapping; verify `go test ./internal/yamtrack/ -run TestPush`.
-- [x] 6.3 Confirm live Yamtrack header form + history/push paths against running instance (service-connectors) — webhook/views + token screen are source of truth; design §7 payload is a stub until then.
+- [ ] 6.3 Confirm live Yamtrack header form + history/push paths against running instance (service-connectors) — webhook/views + token screen are source of truth; design §7 payload is a stub until then.
 
 ## 7. Engine + Store
 

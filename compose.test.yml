@@ -5,6 +5,11 @@ services:
       POSTGRES_USER: watchmesh
       POSTGRES_PASSWORD: watchmesh
       POSTGRES_DB: watchmesh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watchmesh -d watchmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
   tester:
     image: golang:1.24.13-bookworm
     working_dir: /src
@@ -14,4 +19,5 @@ services:
     environment:
       DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy

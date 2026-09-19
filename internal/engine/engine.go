@@ -30,14 +30,18 @@ type Store interface {
 
 // Sync runs since→History→hash-diff→fan-out Push→record state.
 // Fresh hashes are marked seen only for targets whose Push succeeded, so one
-// failing target never blocks the others. SetLastRun advances iff at least
-// one target succeeded; an empty window pushes nothing and touches no state.
+// failing target never blocks the others. SetLastRun advances to the
+// window-end captured before History iff at least one target fully succeeded
+// (Push plus all MarkSeen writes); an empty window pushes nothing and touches
+// no state. History gaps are non-fatal: connectors return empty,nil on
+// best-effort read failures, which Sync treats as an empty window.
 // Per-target errors are combined in the return value.
 func Sync(ctx context.Context, syncName string, src Source, targets []Target, st Store) error {
 	since, err := st.LastRun(ctx, syncName)
 	if err != nil {
 		return err
 	}
+	windowEnd := time.Now()
 	items, err := src.History(ctx, since)
 	if err != nil {
 		return err
@@ -62,15 +66,19 @@ func Sync(ctx context.Context, syncName string, src Source, targets []Target, st
 			errs = append(errs, fmt.Errorf("target %d: %w", i, err))
 			continue
 		}
+		markOK := true
 		for _, it := range fresh {
 			if err := st.MarkSeen(ctx, syncName, it.Hash(), it.WatchedAt); err != nil {
 				errs = append(errs, fmt.Errorf("target %d mark seen: %w", i, err))
+				markOK = false
 			}
 		}
-		succeeded = true
+		if markOK {
+			succeeded = true
+		}
 	}
 	if succeeded {
-		if err := st.SetLastRun(ctx, syncName, time.Now()); err != nil {
+		if err := st.SetLastRun(ctx, syncName, windowEnd); err != nil {
 			errs = append(errs, err)
 		}
 	}

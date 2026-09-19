@@ -1,5 +1,5 @@
 // Package migrations embeds versioned SQL so the binary migrates via iofs
-// with no external files (dev override: --migrations-path file:// dir).
+// with no external files (dev override: --migrations-path <directory>).
 package migrations
 
 import "embed"

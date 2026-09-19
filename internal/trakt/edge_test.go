@@ -209,26 +209,24 @@ func TestFetchKindEdges(t *testing.T) {
 
 func TestPushEdges(t *testing.T) {
 	ctx := context.Background()
-	// Zero WatchedAt is stamped, not dropped.
-	var gotAt any
+	// Zero WatchedAt is skipped, never stamped with a fabricated date.
+	var gotMovies int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var v map[string][]map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
 			t.Error(err)
 		}
-		if len(v["movies"]) == 1 {
-			gotAt = v["movies"][0]["watched_at"]
-		}
+		gotMovies = len(v["movies"])
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
-	items := []model.WatchItem{{IDs: model.IDs{Trakt: 1}, MediaType: "movie"}}
-	if err := New(srv.URL, "c", "s", "t").Push(ctx, items); err != nil {
+	if err := New(srv.URL, "c", "s", "t").Push(ctx, []model.WatchItem{{IDs: model.IDs{Trakt: 1}, MediaType: "movie"}}); err != nil {
 		t.Fatal(err)
 	}
-	if gotAt == nil || gotAt == "" {
-		t.Fatal("zero WatchedAt must be stamped")
+	if gotMovies != 0 {
+		t.Fatal("zero WatchedAt must be skipped, not stamped")
 	}
+	items := []model.WatchItem{{IDs: model.IDs{Trakt: 1}, MediaType: "movie", WatchedAt: time.Now()}}
 	if err := New("http://bad-\x7f-host", "c", "s", "t").Push(ctx, items); err == nil {
 		t.Fatal("bad base URL must fail build")
 	}

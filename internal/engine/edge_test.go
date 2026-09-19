@@ -75,8 +75,8 @@ func TestSyncStoreErrors(t *testing.T) {
 	if err := Sync(ctx, "s", &fakeSource{items: []model.WatchItem{item(1, at)}}, []Target{&fakeTarget{}}, st); err == nil {
 		t.Fatal("MarkSeen error must surface")
 	}
-	if st.setRuns != 1 {
-		t.Fatal("cursor still advances when push succeeded")
+	if st.setRuns != 0 {
+		t.Fatal("cursor must not advance when seen-state persistence fails")
 	}
 	if err := Sync(ctx, "s", &fakeSource{items: []model.WatchItem{item(1, at)}}, []Target{&fakeTarget{}}, &failStore{setErr: boom}); err == nil {
 		t.Fatal("SetLastRun error must surface")

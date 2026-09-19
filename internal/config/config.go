@@ -158,10 +158,18 @@ func Load(flagPath, flagInterval, flagDatabaseURL string) (*Config, error) {
 	return cfg, nil
 }
 
-// Validate fails fast on unknown source/target names.
-// Duplicate types under distinct names are allowed.
+// Validate fails fast on unknown source/target names and on empty or
+// duplicate sync names. Duplicate types under distinct names are allowed.
 func (c *Config) Validate() error {
+	seen := make(map[string]struct{}, len(c.Syncs))
 	for _, s := range c.Syncs {
+		if s.Name == "" {
+			return fmt.Errorf("sync with empty name")
+		}
+		if _, dup := seen[s.Name]; dup {
+			return fmt.Errorf("duplicate sync %q", s.Name)
+		}
+		seen[s.Name] = struct{}{}
 		if _, ok := c.Connections[s.Source]; !ok {
 			return fmt.Errorf("sync %q: unknown source %q", s.Name, s.Source)
 		}

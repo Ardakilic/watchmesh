@@ -85,24 +85,31 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 			"end_date":   endDate(it),
 		})
 		// STUB: POST vs PATCH per-item confirmed live in task 6.3; POST default.
-		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/media/"+kind+"/", bytes.NewReader(body))
-		if err != nil {
+		if err := c.pushOne(ctx, kind, body); err != nil {
 			return err
 		}
-		req.Header.Set("Content-Type", "application/json")
-		c.addAuth(req)
-		resp, err := c.httpClient().Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			return fmt.Errorf("yamtrack push: status %d", resp.StatusCode)
-		}
-		var v json.RawMessage
-		if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-			return fmt.Errorf("yamtrack push: malformed response: %w", err)
-		}
+	}
+	return nil
+}
+
+func (c *Client) pushOne(ctx context.Context, kind string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/media/"+kind+"/", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.addAuth(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("yamtrack push: status %d", resp.StatusCode)
+	}
+	var v json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return fmt.Errorf("yamtrack push: malformed response: %w", err)
 	}
 	return nil
 }
@@ -137,30 +144,19 @@ func fromItem(y yamItem) (model.WatchItem, bool) {
 	return w, true
 }
 
-// History GETs /api/v1/media/{movie|show}/?limit=200&offset= following
-// pagination.next until empty (STUB shape: DRF-style {results,next}).
+// History GETs /api/v1/media/{movie|show}/ following pagination.next as the
+// continuation (DRF-style {results,next}, STUB shape). Opaque next tokens fall
+// back to offset paging; repeated continuations stop the loop.
 func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
 	for _, kind := range []string{"movie", "show"} {
 		offset := 0
+		nextURL := fmt.Sprintf("%s/api/v1/media/%s/?limit=200&offset=%d", c.BaseURL, kind, offset)
+		seenNext := map[string]struct{}{}
 		for {
-			u := fmt.Sprintf("%s/api/v1/media/%s/?limit=200&offset=%d", c.BaseURL, kind, offset)
-			req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+			p, err := c.fetchPage(ctx, nextURL)
 			if err != nil {
 				return nil, err
-			}
-			c.addAuth(req)
-			resp, err := c.httpClient().Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("yamtrack history: status %d", resp.StatusCode)
-			}
-			var p yamPage
-			if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
-				return nil, fmt.Errorf("yamtrack history: malformed response: %w", err)
 			}
 			if len(p.Results) == 0 {
 				break
@@ -175,13 +171,56 @@ func (c *Client) History(ctx context.Context, since time.Time) ([]model.WatchIte
 				}
 				out = append(out, w)
 			}
-			offset += len(p.Results)
 			if p.Next == nil || *p.Next == "" {
 				break
 			}
+			if _, dup := seenNext[*p.Next]; dup {
+				break
+			}
+			seenNext[*p.Next] = struct{}{}
+			if u := resolveNext(c.BaseURL, *p.Next); u != "" {
+				nextURL = u
+				continue
+			}
+			offset += len(p.Results)
+			nextURL = fmt.Sprintf("%s/api/v1/media/%s/?limit=200&offset=%d", c.BaseURL, kind, offset)
 		}
 	}
 	return out, nil
+}
+
+// resolveNext turns a pagination.next value into the next request URL.
+// Full URLs and absolute paths are followed; opaque tokens ("x") return ""
+// so the caller falls back to offset paging.
+func resolveNext(base, next string) string {
+	if strings.HasPrefix(next, "http://") || strings.HasPrefix(next, "https://") {
+		return next
+	}
+	if strings.HasPrefix(next, "/") {
+		return strings.TrimSuffix(base, "/") + next
+	}
+	return ""
+}
+
+func (c *Client) fetchPage(ctx context.Context, u string) (yamPage, error) {
+	var p yamPage
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return p, err
+	}
+	c.addAuth(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return p, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return p, fmt.Errorf("yamtrack history: status %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		return p, fmt.Errorf("yamtrack history: malformed response: %w", err)
+	}
+	return p, nil
 }
 
 // ValidateToken does one GET expecting 200.

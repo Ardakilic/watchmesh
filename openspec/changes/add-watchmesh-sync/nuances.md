@@ -23,7 +23,7 @@ Tech decisions + uncertainties for fresh-context apply. Read with `design.md`.
 
 ## API notes (Sep 2026)
 
-- Trakt: device flow `POST /oauth/device/code` → poll `/oauth/device/token`; headers `trakt-api-key` + `Bearer` + `trakt-api-version: 2`; `GET /sync/history` + `POST /sync/history`. Rate limit verify live (commonly 1000 GET/5min, 1 POST/s); backoff on 429.
+- Trakt: device flow `POST /oauth/device/code` → poll `/oauth/device/token`; headers `trakt-api-key` + `Bearer` + `trakt-api-version: 2`; `GET /sync/history` + `POST /sync/history`. Rate limit verify live (commonly 500 requests/5min, 1 POST/s); backoff on 429.
 - Simkl: PIN `GET /oauth/pin?client_id` → poll `GET /oauth/pin/{code}` (5y token, no refresh); MUST call `GET /sync/activities` before `GET /sync/all-items`; `POST /sync/history`; 10 GET/s, 1 POST/s, 20s per-user write lock → 400 rate_limit.
 - Ryot ⚠️ introspect live GraphQL schema (candidate `updateSeenHistory`/`UpdateSeenInput`, `metadataId: tmdb://…`); treat as target-first, history best-effort; confirm auth header + enums before finalizing.
 - Yamtrack ⚠️ inspect live webhook/views + token screen (candidate `POST {base}/webhook/{token}` `{source:tmdb, media_type, media_id, status, end_date}`); confirm header (`Bearer` vs `X-API-Key` vs `?token=`) and history GET existence; CSV import remains bulk fallback.

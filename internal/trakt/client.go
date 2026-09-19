@@ -130,79 +130,91 @@ func parseTime(s string) time.Time {
 
 func (c *Client) fetchKind(ctx context.Context, kind string, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
-	for page := 1; ; page++ {
+	// ponytail: page cap, raise if a library ever exceeds 10k history entries.
+	const maxPages = 100
+	for page := 1; page <= maxPages; page++ {
 		u := fmt.Sprintf("%s/sync/history/%s?page=%d&limit=100", c.BaseURL, kind, page)
 		if !since.IsZero() {
 			u += "&start_at=" + since.UTC().Format(time.RFC3339)
 		}
-		resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
-			req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-			if err != nil {
-				return nil, err
-			}
-			c.setHeaders(req)
-			return req, nil
-		})
+		entries, empty, err := c.fetchPage(ctx, kind, u)
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("trakt history %s: status %d", kind, resp.StatusCode)
+		if empty {
+			break
 		}
-		if kind == "movies" {
-			var entries []movieEntry
-			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-				return nil, fmt.Errorf("trakt history %s: malformed response: %w", kind, err)
-			}
-			if len(entries) == 0 {
-				break
-			}
-			for _, e := range entries {
-				out = append(out, model.WatchItem{
-					IDs:       model.IDs{Trakt: e.Movie.IDs.Trakt, IMDB: e.Movie.IDs.IMDB, TMDB: e.Movie.IDs.TMDB, TVDB: e.Movie.IDs.TVDB},
-					MediaType: "movie",
-					Title:     e.Movie.Title,
-					Year:      e.Movie.Year,
-					WatchedAt: parseTime(e.WatchedAt),
-				})
-			}
-		} else {
-			var entries []episodeEntry
-			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-				return nil, fmt.Errorf("trakt history %s: malformed response: %w", kind, err)
-			}
-			if len(entries) == 0 {
-				break
-			}
-			for _, e := range entries {
-				ids := model.IDs{Trakt: e.Episode.IDs.Trakt, TMDB: e.Episode.IDs.TMDB, TVDB: e.Episode.IDs.TVDB}
-				if e.Episode.IDs.IMDB != "" {
-					ids.IMDB = e.Episode.IDs.IMDB
-				} else {
-					ids.IMDB = e.Show.IDs.IMDB
-				}
-				if ids.TMDB == 0 {
-					ids.TMDB = e.Show.IDs.TMDB
-				}
-				if ids.TVDB == 0 {
-					ids.TVDB = e.Show.IDs.TVDB
-				}
-				title := e.Show.Title
-				year := e.Show.Year
-				out = append(out, model.WatchItem{
-					IDs:       ids,
-					MediaType: "episode",
-					Title:     title,
-					Year:      year,
-					Season:    e.Episode.Season,
-					Episode:   e.Episode.Number,
-					WatchedAt: parseTime(e.WatchedAt),
-				})
-			}
-		}
+		out = append(out, entries...)
 	}
 	return out, nil
+}
+
+func (c *Client) fetchPage(ctx context.Context, kind, u string) (entries []model.WatchItem, empty bool, err error) {
+	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+		return req, nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("trakt history %s: status %d", kind, resp.StatusCode)
+	}
+	if kind == "movies" {
+		var list []movieEntry
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			return nil, false, fmt.Errorf("trakt history %s: malformed response: %w", kind, err)
+		}
+		if len(list) == 0 {
+			return nil, true, nil
+		}
+		for _, e := range list {
+			entries = append(entries, model.WatchItem{
+				IDs:       model.IDs{Trakt: e.Movie.IDs.Trakt, IMDB: e.Movie.IDs.IMDB, TMDB: e.Movie.IDs.TMDB, TVDB: e.Movie.IDs.TVDB},
+				MediaType: "movie",
+				Title:     e.Movie.Title,
+				Year:      e.Movie.Year,
+				WatchedAt: parseTime(e.WatchedAt),
+			})
+		}
+		return entries, false, nil
+	}
+	var list []episodeEntry
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return nil, false, fmt.Errorf("trakt history %s: malformed response: %w", kind, err)
+	}
+	if len(list) == 0 {
+		return nil, true, nil
+	}
+	for _, e := range list {
+		ids := model.IDs{Trakt: e.Episode.IDs.Trakt, TMDB: e.Episode.IDs.TMDB, TVDB: e.Episode.IDs.TVDB}
+		if e.Episode.IDs.IMDB != "" {
+			ids.IMDB = e.Episode.IDs.IMDB
+		} else {
+			ids.IMDB = e.Show.IDs.IMDB
+		}
+		if ids.TMDB == 0 {
+			ids.TMDB = e.Show.IDs.TMDB
+		}
+		if ids.TVDB == 0 {
+			ids.TVDB = e.Show.IDs.TVDB
+		}
+		entries = append(entries, model.WatchItem{
+			IDs:       ids,
+			MediaType: "episode",
+			Title:     e.Show.Title,
+			Year:      e.Show.Year,
+			Season:    e.Episode.Season,
+			Episode:   e.Episode.Number,
+			WatchedAt: parseTime(e.WatchedAt),
+		})
+	}
+	return entries, false, nil
 }
 
 // History GETs /sync/history/movies + /episodes with paging until empty.
@@ -236,17 +248,18 @@ func pushID(ids model.IDs) pushIDs {
 }
 
 // Push POSTs /sync/history grouping movies/episodes per design §7.
-// Media types other than movie/episode are skipped (no Trakt shape).
+// Media types other than movie/episode are skipped (no Trakt shape), as are
+// items with zero WatchedAt: stamping time.Now() would fabricate history.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 	body := struct {
 		Movies   []pushEntry `json:"movies"`
 		Episodes []pushEntry `json:"episodes"`
 	}{Movies: []pushEntry{}, Episodes: []pushEntry{}}
 	for _, it := range items {
-		at := it.WatchedAt.UTC().Format(time.RFC3339)
 		if it.WatchedAt.IsZero() {
-			at = time.Now().UTC().Format(time.RFC3339)
+			continue
 		}
+		at := it.WatchedAt.UTC().Format(time.RFC3339)
 		switch it.MediaType {
 		case "movie":
 			body.Movies = append(body.Movies, pushEntry{WatchedAt: at, IDs: pushID(it.IDs)})

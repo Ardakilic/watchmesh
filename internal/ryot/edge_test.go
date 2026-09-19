@@ -36,12 +36,14 @@ func TestMetadataIDKinds(t *testing.T) {
 	for _, tt := range []struct{ typ, want string }{
 		{"movie", "tmdb://movie/603"},
 		{"show", "tmdb://show/603"},
-		{"episode", "tmdb://show/603"},
 	} {
 		id, ok := metadataID(model.WatchItem{IDs: model.IDs{TMDB: 603}, MediaType: tt.typ})
 		if !ok || id != tt.want {
 			t.Fatalf("%s: got %q,%v", tt.typ, id, ok)
 		}
+	}
+	if _, ok := metadataID(model.WatchItem{IDs: model.IDs{TMDB: 603}, MediaType: "episode"}); ok {
+		t.Fatal("episodes must skip: no episode-capable payload yet")
 	}
 	if _, ok := metadataID(model.WatchItem{MediaType: "movie"}); ok {
 		t.Fatal("TMDB==0 must skip")

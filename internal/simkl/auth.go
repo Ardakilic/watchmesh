@@ -54,7 +54,11 @@ func (c *Client) RequestPIN(ctx context.Context) (*pinResp, error) {
 }
 
 // PollPINToken GETs /oauth/pin/{code} until an access_token appears.
+// Non-positive intervals fall back to 5s so callers never busy-poll.
 func (c *Client) PollPINToken(ctx context.Context, userCode string, interval time.Duration) (string, error) {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
 	base := strings.TrimSuffix(strings.TrimSpace(c.BaseURL), "/")
 	if base == "" {
 		base = DefaultBaseURL
@@ -89,12 +93,10 @@ func (c *Client) PollPINToken(ctx context.Context, userCode string, interval tim
 		if status != http.StatusOK && status != http.StatusNotFound && status != http.StatusBadRequest && status != http.StatusUnauthorized {
 			return "", fmt.Errorf("simkl pin poll: status %d", status)
 		}
-		if interval > 0 {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(interval):
-			}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(interval):
 		}
 	}
 }

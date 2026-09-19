@@ -13,9 +13,14 @@ func pgURL(t *testing.T) string {
 	if testing.Short() {
 		t.Skip("short: needs real PG")
 	}
-	url := os.Getenv("DATABASE_URL")
+	// Isolated test database first; generic DATABASE_URL only as fallback so
+	// migrations and roundtrips never touch shared application data.
+	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("DATABASE_URL unset")
+		url = os.Getenv("DATABASE_URL")
+	}
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL/DATABASE_URL unset")
 	}
 	return url
 }
@@ -57,6 +62,16 @@ func TestStoreRoundtrip(t *testing.T) {
 	defer st.Close()
 
 	sync := fmt.Sprintf("test-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cs, err := New(ctx, url)
+		if err != nil {
+			return
+		}
+		defer cs.Close()
+		_, _ = cs.pool.Exec(ctx, `DELETE FROM seen_items WHERE sync_name=$1`, sync)
+		_, _ = cs.pool.Exec(ctx, `DELETE FROM sync_state WHERE sync_name=$1`, sync)
+	})
 	if got, err := st.LastRun(ctx, sync); err != nil || !got.IsZero() {
 		t.Fatalf("fresh LastRun = %v, %v; want zero", got, err)
 	}

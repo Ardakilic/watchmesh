@@ -76,3 +76,30 @@ func TestLoadValidateError(t *testing.T) {
 		t.Fatal("unknown source must fail")
 	}
 }
+
+func TestValidateSyncNames(t *testing.T) {
+	base := &Config{Connections: map[string]Connection{"a": {Type: "trakt"}}}
+	if err := (&Config{
+		Connections: base.Connections,
+		Syncs:       []Sync{{Name: "", Source: "a", Targets: []string{"a"}}},
+	}).Validate(); err == nil {
+		t.Fatal("empty sync name must fail")
+	}
+	dup := &Config{
+		Connections: base.Connections,
+		Syncs: []Sync{
+			{Name: "m", Source: "a", Targets: []string{"a"}},
+			{Name: "m", Source: "a", Targets: []string{"a"}},
+		},
+	}
+	if err := dup.Validate(); err == nil {
+		t.Fatal("duplicate sync name must fail")
+	}
+	ok := &Config{
+		Connections: base.Connections,
+		Syncs:       []Sync{{Name: "m", Source: "a", Targets: []string{"a"}}},
+	}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("uniquely named sync must pass: %v", err)
+	}
+}

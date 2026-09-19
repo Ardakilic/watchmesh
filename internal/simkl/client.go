@@ -130,8 +130,8 @@ type activityCursor struct {
 }
 
 func (c *Client) activities(ctx context.Context) (map[string]activityCursor, error) {
-	c.throttleGET()
 	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
+		c.throttleGET()
 		req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/sync/activities", nil)
 		if err != nil {
 			return nil, err
@@ -187,12 +187,12 @@ func toIDs(s simklIDs) model.IDs {
 }
 
 func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
-	c.throttleGET()
 	u := fmt.Sprintf("%s/sync/all-items/%s", c.BaseURL, cat)
 	if !since.IsZero() {
 		u += "?date_from=" + since.UTC().Format(time.RFC3339)
 	}
 	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
+		c.throttleGET()
 		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 		if err != nil {
 			return nil, err
@@ -313,7 +313,6 @@ type pushShow struct {
 
 // Push POSTs /sync/history per design §7 at 1 POST/s.
 func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
-	c.throttlePOST()
 	body := struct {
 		Movies []pushMovie `json:"movies"`
 		Shows  []pushShow  `json:"shows"`
@@ -342,6 +341,7 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) error {
 	}
 	raw, _ := json.Marshal(body)
 	resp, err := doWithRetry(ctx, c.httpClient(), func() (*http.Request, error) {
+		c.throttlePOST()
 		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/sync/history", bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
