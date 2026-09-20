@@ -12,11 +12,11 @@ make clean        # rm artifacts; compose down -v
 make migrate-new NAME=add_x   # scaffold migrations/NNNNNN_add_x.{up,down}.sql
 ```
 
-CI runs on PRs + main: `go vet ./...`, `gofmt -l` empty, `go test ./...`, `make cover` gate. Match it before opening a PR.
+CI runs on PRs + main: `go vet ./...`, `gofmt -l` empty, `go test ./... -count=1`, plus the coverage pair directly (`go test -coverprofile=c.out ./internal/...` + `go tool cover`, same 90% gate as `make cover`). Match it before opening a PR.
 
 ## Layout
 
-`cmd/watchmesh/` (CLI: `sync|serve|auth`) → `internal/engine/` (fan-out) → `internal/{trakt,simkl,ryot,yamtrack}/` (connectors) → `internal/store/` (pgx cursors + seen hashes). Shared types in `internal/model/`, config in `internal/config/`. Specs: `openspec/changes/add-watchmesh-sync/` (`design.md`, `nuances.md`, `tasks.md`).
+`cmd/watchmesh/` (CLI: `sync|serve|auth`) → `internal/engine/` (`Sync` fans out to connectors, records state via `Store`) → `internal/{trakt,simkl,ryot,yamtrack}/` (`Source`/`Target`) + `internal/store/` (`Store`: pgx cursors + seen hashes). Shared types in `internal/model/`, config in `internal/config/`. Specs: `openspec/changes/add-watchmesh-sync/` (`design.md`, `nuances.md`, `tasks.md`).
 
 ## Go rules
 
