@@ -111,3 +111,13 @@ func TestValidateSyncNames(t *testing.T) {
 		t.Fatalf("uniquely named sync must pass: %v", err)
 	}
 }
+
+// TestDefaultWritePathFallback verifies the relative fallback when XDG and HOME are empty.
+func TestDefaultWritePathFallback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	got := DefaultWritePath()
+	if got != filepath.Join(".config", "watchmesh", "config.json") {
+		t.Fatalf("got %q want %q", got, filepath.Join(".config", "watchmesh", "config.json"))
+	}
+}

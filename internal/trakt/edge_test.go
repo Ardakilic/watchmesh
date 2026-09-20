@@ -342,3 +342,65 @@ func TestAuthEdges(t *testing.T) {
 		t.Fatal("cancel during sleep must fail")
 	}
 }
+
+// captureRT captures the request URL then returns a controlled error.
+type captureRT struct {
+	gotURL string
+	err    error
+}
+
+// RoundTrip implements http.RoundTripper.
+func (c *captureRT) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.gotURL = req.URL.String()
+	return nil, c.err
+}
+
+// TestRequestDeviceCodeEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
+func TestRequestDeviceCodeEmptyBaseFallback(t *testing.T) {
+	rt := &captureRT{err: errors.New("boom")}
+	c := &Client{HTTP: &http.Client{Transport: rt}, ClientID: "c", ClientSecret: "s"}
+	if _, err := c.RequestDeviceCode(context.Background()); err == nil {
+		t.Fatal("controlled transport error must propagate")
+	}
+	if rt.gotURL != DefaultBaseURL+"/oauth/device/code" {
+		t.Fatalf("got URL %q want %q", rt.gotURL, DefaultBaseURL+"/oauth/device/code")
+	}
+}
+
+// TestPollDeviceTokenEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
+func TestPollDeviceTokenEmptyBaseFallback(t *testing.T) {
+	rt := &captureRT{err: errors.New("boom")}
+	c := &Client{HTTP: &http.Client{Transport: rt}, ClientID: "c", ClientSecret: "s"}
+	if _, err := c.PollDeviceToken(context.Background(), "dev", 0); err == nil {
+		t.Fatal("controlled transport error must propagate")
+	}
+	if rt.gotURL != DefaultBaseURL+"/oauth/device/token" {
+		t.Fatalf("got URL %q want %q", rt.gotURL, DefaultBaseURL+"/oauth/device/token")
+	}
+}
+
+// TestUnresolvedIDMatches verifies each ID kind matches its not_found entry.
+func TestUnresolvedIDMatches(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		ids  model.IDs
+		nf   notFoundEntry
+		want bool
+	}{
+		{"trakt", model.IDs{Trakt: 7}, notFoundEntry{IDs: traktIDs{Trakt: 7}}, true},
+		{"imdb", model.IDs{IMDB: "tt123"}, notFoundEntry{IDs: traktIDs{IMDB: "tt123"}}, true},
+		{"tmdb", model.IDs{TMDB: 603}, notFoundEntry{IDs: traktIDs{TMDB: 603}}, true},
+		{"tvdb", model.IDs{TVDB: 888}, notFoundEntry{IDs: traktIDs{TVDB: 888}}, true},
+		{"mismatch", model.IDs{Trakt: 1}, notFoundEntry{IDs: traktIDs{Trakt: 2}}, false},
+		{"empty", model.IDs{Trakt: 1}, notFoundEntry{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unresolved(tt.ids, []notFoundEntry{tt.nf}); got != tt.want {
+				t.Fatalf("got %v want %v", got, tt.want)
+			}
+		})
+	}
+	if unresolved(model.IDs{Trakt: 1}, nil) {
+		t.Fatal("nil list must not match")
+	}
+}
