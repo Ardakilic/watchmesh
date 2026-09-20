@@ -362,8 +362,8 @@ func TestRequestDeviceCodeEmptyBaseFallback(t *testing.T) {
 	if _, err := c.RequestDeviceCode(context.Background()); err == nil {
 		t.Fatal("controlled transport error must propagate")
 	}
-	if !strings.HasPrefix(rt.gotURL, DefaultBaseURL) {
-		t.Fatalf("got URL %q want prefix %q", rt.gotURL, DefaultBaseURL)
+	if rt.gotURL != DefaultBaseURL+"/oauth/device/code" {
+		t.Fatalf("got URL %q want %q", rt.gotURL, DefaultBaseURL+"/oauth/device/code")
 	}
 }
 
@@ -374,8 +374,8 @@ func TestPollDeviceTokenEmptyBaseFallback(t *testing.T) {
 	if _, err := c.PollDeviceToken(context.Background(), "dev", 0); err == nil {
 		t.Fatal("controlled transport error must propagate")
 	}
-	if !strings.HasPrefix(rt.gotURL, DefaultBaseURL) {
-		t.Fatalf("got URL %q want prefix %q", rt.gotURL, DefaultBaseURL)
+	if rt.gotURL != DefaultBaseURL+"/oauth/device/token" {
+		t.Fatalf("got URL %q want %q", rt.gotURL, DefaultBaseURL+"/oauth/device/token")
 	}
 }
 
