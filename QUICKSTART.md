@@ -45,7 +45,7 @@ Want `OK` on both before continuing.
 6. Export the four tokens and start the sync loop:
 ```sh
 export TRAKT_TOKEN=xxx SIMKL_TOKEN=xxx RYOT_TOKEN=xxx YAM_TOKEN=xxx
-docker compose up --build
+docker compose up
 ```
 First run imports full Trakt history; later ticks (every `interval`) are incremental.
 

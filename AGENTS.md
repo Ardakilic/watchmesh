@@ -2,11 +2,11 @@
 
 ## Build / test (docker-only)
 
-Host needs only Docker. All Go runs in the pinned `golang:1.24.13-bookworm` container; PG only via compose.
+Host needs only Docker. All Go runs in the pinned `golang:1.27.1-bookworm` container; PG only via compose.
 
 ```sh
 make build        # docker build -t watchmesh .
-make dev          # docker compose up --build
+make dev          # compose.yml + compose.dev.yml up --build (local build); compose.yml alone pulls ghcr.io/ardakilic/watchmesh:latest
 make test         # go test ./... -count=1 (containerized)
 make itest        # compose.test.yml: ephemeral postgres:16-alpine + tester
 make cover        # 90% gate on ./internal/...

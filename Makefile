@@ -8,7 +8,7 @@ build:
 	docker build -t watchmesh .
 
 dev:
-	docker compose up --build
+	docker compose -f compose.yml -f compose.dev.yml up --build
 
 test:
 	$(RUN) go test ./... -count=1

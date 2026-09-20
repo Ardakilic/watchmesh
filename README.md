@@ -17,20 +17,6 @@ flowchart LR
     M --> D[All targets OK? advance cursor]
 ```
 
-## Quickstart
-
-```sh
-cp config.example.json config.json        # edit connections + syncs
-cp .env.example .env                      # fill dummy values with real ones
-set -a; . ./.env; set +a                  # export .env for the go run commands below
-export DATABASE_URL=postgres://watchmesh:watchmesh@localhost:5432/watchmesh?sslmode=disable
-make dev                                  # compose: postgres + serve
-go run ./cmd/watchmesh auth --config config.json --connection trakt_main
-go run ./cmd/watchmesh sync --config config.json
-```
-
-Config resolution: `--config` > `WATCHMESH_CONFIG` > `$XDG_CONFIG_HOME/watchmesh/config.json` > `~/.config/watchmesh/config.json` > legacy `~/.watchmesh/config.json`. Any `"env:VAR"` value expands from the environment. Env: `DATABASE_URL`, `WATCHMESH_INTERVAL`, `WATCHMESH_CONFIG` (+ `TEST_DATABASE_URL` for itest).
-
 ## Commands
 
 | Command | What it does |
@@ -39,7 +25,7 @@ Config resolution: `--config` > `WATCHMESH_CONFIG` > `$XDG_CONFIG_HOME/watchmesh
 | `watchmesh serve [--config p] [--migrations-path d]` | Ticker loop on `interval` until SIGINT/SIGTERM |
 | `watchmesh auth [--config p] --connection <name>` | Trakt device / Simkl PIN flow, or Ryot/Yamtrack token check |
 | `make build` | `docker build -t watchmesh .` |
-| `make dev` | `docker compose up --build` |
+| `make dev` | `compose.yml` + `compose.dev.yml up --build` (local build) |
 | `make test` | `go test ./...` in pinned golang container |
 | `make itest` | Ephemeral PG + tester via `compose.test.yml` |
 | `make cover` | Fails below 90% on `./internal/...` |

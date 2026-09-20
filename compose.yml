@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: ghcr.io/ardakilic/watchmesh:latest
     command: serve
     environment:
       DATABASE_URL: postgres://watchmesh:watchmesh@postgres:5432/watchmesh?sslmode=disable
