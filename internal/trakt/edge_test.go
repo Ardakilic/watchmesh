@@ -238,7 +238,6 @@ func TestPushNotFound(t *testing.T) {
 	}
 }
 
-// TestPushEdges verifies zero WatchedAt skips and transport failures surface.
 func TestPushEdges(t *testing.T) {
 	ctx := context.Background()
 	// Zero WatchedAt is skipped, never stamped with a fabricated date.
@@ -344,23 +343,39 @@ func TestAuthEdges(t *testing.T) {
 	}
 }
 
+// captureRT captures the request URL then returns a controlled error.
+type captureRT struct {
+	gotURL string
+	err    error
+}
+
+// RoundTrip implements http.RoundTripper.
+func (c *captureRT) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.gotURL = req.URL.String()
+	return nil, c.err
+}
+
 // TestRequestDeviceCodeEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
 func TestRequestDeviceCodeEmptyBaseFallback(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	c := &Client{ClientID: "cid", ClientSecret: "sec"}
-	if _, err := c.RequestDeviceCode(ctx); err == nil {
-		t.Fatal("empty base with cancelled ctx must fail after fallback")
+	rt := &captureRT{err: errors.New("boom")}
+	c := &Client{HTTP: &http.Client{Transport: rt}, ClientID: "c", ClientSecret: "s"}
+	if _, err := c.RequestDeviceCode(context.Background()); err == nil {
+		t.Fatal("controlled transport error must propagate")
+	}
+	if !strings.HasPrefix(rt.gotURL, DefaultBaseURL) {
+		t.Fatalf("got URL %q want prefix %q", rt.gotURL, DefaultBaseURL)
 	}
 }
 
 // TestPollDeviceTokenEmptyBaseFallback verifies empty BaseURL falls back to DefaultBaseURL.
 func TestPollDeviceTokenEmptyBaseFallback(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	c := &Client{ClientID: "cid", ClientSecret: "sec"}
-	if _, err := c.PollDeviceToken(ctx, "dev", 0); err == nil {
-		t.Fatal("empty base with cancelled ctx must fail after fallback")
+	rt := &captureRT{err: errors.New("boom")}
+	c := &Client{HTTP: &http.Client{Transport: rt}, ClientID: "c", ClientSecret: "s"}
+	if _, err := c.PollDeviceToken(context.Background(), "dev", 0); err == nil {
+		t.Fatal("controlled transport error must propagate")
+	}
+	if !strings.HasPrefix(rt.gotURL, DefaultBaseURL) {
+		t.Fatalf("got URL %q want prefix %q", rt.gotURL, DefaultBaseURL)
 	}
 }
 

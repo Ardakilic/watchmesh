@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -118,7 +117,7 @@ func TestDefaultWritePathFallback(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
 	got := DefaultWritePath()
-	if !strings.HasSuffix(got, filepath.Join("watchmesh", "config.json")) {
-		t.Fatalf("got %q want watchmesh/config.json suffix", got)
+	if got != filepath.Join(".config", "watchmesh", "config.json") {
+		t.Fatalf("got %q want %q", got, filepath.Join(".config", "watchmesh", "config.json"))
 	}
 }
