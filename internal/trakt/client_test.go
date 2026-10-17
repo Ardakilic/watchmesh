@@ -13,7 +13,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
-// checkHeaders asserts the Trakt key, Bearer, and version headers.
+// checkHeaders asserts the Trakt key, Bearer, version, and watchmesh UA headers.
 func checkHeaders(t *testing.T, r *http.Request) {
 	t.Helper()
 	if r.Header.Get("trakt-api-key") != "cid" {
@@ -24,6 +24,9 @@ func checkHeaders(t *testing.T, r *http.Request) {
 	}
 	if r.Header.Get("trakt-api-version") != "2" {
 		t.Fatalf("version=%q", r.Header.Get("trakt-api-version"))
+	}
+	if r.Header.Get("User-Agent") != model.UserAgent {
+		t.Fatalf("ua=%q", r.Header.Get("User-Agent"))
 	}
 }
 
@@ -48,7 +51,7 @@ func TestHistoryMoviesAndEpisodes(t *testing.T) {
 				fmt.Fprint(w, `[]`)
 				return
 			}
-			fmt.Fprint(w, `[{"watched_at":"2026-05-13T19:00:00.000Z","episode":{"season":1,"number":1,"ids":{"trakt":16,"tvdb":269953,"tmdb":349232}},"show":{"title":"S","year":2010,"ids":{"trakt":2}}}]`)
+			fmt.Fprint(w, `[{"watched_at":"2026-05-13T19:00:00.000Z","episode":{"season":1,"number":1,"ids":{"trakt":16,"tvdb":269953,"tmdb":349232}},"show":{"title":"S","year":2010,"ids":{"trakt":2,"tmdb":999}}}]`)
 			return
 		}
 		w.WriteHeader(404)
@@ -70,6 +73,9 @@ func TestHistoryMoviesAndEpisodes(t *testing.T) {
 	}
 	if e.MediaType != "episode" || e.Season != 1 || e.Episode != 1 || e.IDs.TVDB != 269953 {
 		t.Fatalf("episode=%+v", e)
+	}
+	if e.IDs.TMDB != 999 {
+		t.Fatalf("episodes must carry the show TMDB, got %d (episode-level 349232 must not leak)", e.IDs.TMDB)
 	}
 	if e.WatchedAt.IsZero() {
 		t.Fatal("episode watched_at dropped")

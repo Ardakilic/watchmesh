@@ -28,15 +28,15 @@ Ordered by dependency; each task verifiable in one session.
 
 ## 5. Ryot connector
 
-- [x] 5.1 Implement ryot Push via Bearer POST {url}/backend/graphql ImportCompletedItems mutation (service-connectors) — target-first, TMDB-first ID lookup; verify `go test ./internal/ryot/`.
-- [x] 5.2 Implement ryot History best-effort + token validation GET (service-connectors, app-ops) — history gaps never fail sync; verify `go test ./internal/ryot/ -run TestHistory`.
-- [ ] 5.3 Introspect live Ryot GraphQL schema + auth form before finalizing field/enum names (service-connectors) — candidate mutation/inputs in design §7 are stubs; verify against running instance docs/token screen.
+- [x] 5.1 Implement ryot Push via Bearer POST {base}/backend/graphql (service-connectors) — per `(lot,tmdb)` bucket: `metadataSearch` → strict `metadataDetails` TMDB-identifier match → chunked `deployBulkMetadataProgressUpdate` (target-first, TMDB-only resolution); verify `go test ./internal/ryot/`.
+- [x] 5.2 Implement ryot History best-effort via paged `userMetadataList` (MOVIE/SHOW, TMDB source filter) + chunked aliased `metadataDetails`/`userMetadataDetails` reads — gaps never fail sync — plus token validation via the `userDetails` probe (service-connectors, app-ops); verify `go test ./internal/ryot/ -run TestHistory`.
+- [x] 5.3 Ryot GraphQL introspection done from pinned v10.5.3 sources (Oct 2026): SCREAMING_SNAKE_CASE enums (`MOVIE`/`SHOW`/`TMDB`), cache-wrapped list responses, `deployBulkMetadataProgressUpdate` → bare bool, `userDetails` union probe — live-instance end-to-end check still recommended at first deploy (service-connectors).
 
 ## 6. Yamtrack connector
 
-- [x] 6.1 Implement yamtrack History GET /api/v1/media/{type}/ with limit/offset up to 200 following pagination.next (service-connectors) — Bearer or X-API-Key; verify `go test ./internal/yamtrack/`.
-- [x] 6.2 Implement yamtrack Push as looped single POST/PATCH per item, no batch call (service-connectors) — {source:tmdb, media_id} mapping; verify `go test ./internal/yamtrack/ -run TestPush`.
-- [ ] 6.3 Confirm live Yamtrack header form + history/push paths against running instance (service-connectors) — webhook/views + token screen are source of truth; design §7 payload is a stub until then.
+- [x] 6.1 Yamtrack history confirmed absent: dev-branch sources expose no REST history endpoint (webhook-ingested entries are not listable) → `History` is a documented no-op returning `empty,nil` (service-connectors); verify `go test ./internal/yamtrack/ -run TestHistory`.
+- [x] 6.2 Implement yamtrack Push as one `POST {base}/webhook/jellyfin/{token}` per item, no batch (service-connectors) — Jellyfin stop event: movies send Item `Tmdb`(+`Imdb`); episodes send `Series` TMDB + `ParentIndexNumber`/`IndexNumber` + Item-level `Imdb` only; verify `go test ./internal/yamtrack/ -run TestPush`.
+- [x] 6.3 Yamtrack webhook behavior confirmed from pinned dev-branch sources (Oct 2026; `src/integrations/webhooks/{base,jellyfin,tv,movie}.py`): token-in-path 401/400 semantics, `UserData.Played` completion gate, Item-level `Tvdb` is an EPISODE id (excluded), 5s episode dedupe — live-instance end-to-end check still recommended at first deploy (service-connectors).
 
 ## 7. Engine + Store
 

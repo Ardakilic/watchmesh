@@ -37,8 +37,9 @@ return fmt.Errorf("sync %q: %w", name, err)
 - State is keyed by **connection name**, never connector type. `Push` returns the delivered subset — only delivered items are marked seen; any failure/skip holds the cursor; empty windows touch no state.
 - History read gaps return `empty, nil` — never fail a sync. Matching is TMDB-based; items without a TMDB id are skipped on push.
 - Every connector retries **once** on 429, waiting `Retry-After` (default 1s).
-- Simkl: always dirty-check `GET /sync/activities` before `/sync/all-items` — timer-polling it risks `client_id` suspension.
-- Ryot/Yamtrack are STUBS: target-first, history best-effort. Introspect live instances before finalizing field maps.
+- Simkl: always dirty-check `GET /sync/activities` before `/sync/all-items` — timer-polling it risks `client_id` suspension. `date_from` is trusted (seen-hash dedupe absorbs over-delivery); burst `rate_limit` retries after a fixed 1s, but daily caps (`user_limit_exceeded`/`app_limit_exceeded`) are fatal with the reset seconds.
+- Trakt device poll: 400 pending; 429 slow_down (+5s interval bump, `Retry-After` honored, wait capped at 60s); 404/409/410/418 terminal, no retry.
+- Ryot/Yamtrack: field maps confirmed against pinned upstream sources (Ryot v10.5.3, Yamtrack dev, Oct 2026), not live instances — target-first, history best-effort; re-verify end-to-end on a live instance before rollout.
 
 ## Migrations
 

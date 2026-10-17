@@ -84,3 +84,24 @@ func TestPollPINPendingThenOK(t *testing.T) {
 		t.Fatalf("polls=%d want 2", n)
 	}
 }
+
+// TestPINAuthExpires verifies PINAuth's poll is bounded by expires_in and
+// maps exhaustion to an expiry error instead of a raw context error.
+func TestPINAuthExpires(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/pin":
+			fmt.Fprint(w, `{"user_code":"PINX","verification_url":"https://simkl.com/pin","expires_in":1,"interval":0}`)
+		default:
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := New(srv.URL, "cid", "").PINAuth(ctx, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "simkl pin expired") {
+		t.Fatalf("err=%v want simkl pin expired", err)
+	}
+}

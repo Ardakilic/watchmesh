@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -36,69 +35,94 @@ func TestNameAndHTTPClient(t *testing.T) {
 	}
 }
 
-// TestMediaKindUnknown verifies unknown types skip and episodes map to shows.
-func TestMediaKindUnknown(t *testing.T) {
-	if _, ok := mediaKind(model.WatchItem{MediaType: "podcast"}); ok {
-		t.Fatal("unknown type must skip")
-	}
-	if k, ok := mediaKind(model.WatchItem{MediaType: "episode"}); !ok || k != "show" {
-		t.Fatalf("episode -> %q,%v", k, ok)
-	}
-}
-
-// TestEndDateZero verifies zero WatchedAt becomes today's date.
-func TestEndDateZero(t *testing.T) {
-	if got := endDate(model.WatchItem{}); got != time.Now().UTC().Format("2006-01-02") {
-		t.Fatalf("got %q", got)
-	}
-}
-
-// TestResolveNextOrigin verifies continuation URLs never leave the
-// configured origin: absolute same-origin URLs and paths are followed,
-// cross-origin/scheme/port URLs and opaque tokens fall back to offset paging.
-func TestResolveNextOrigin(t *testing.T) {
-	base := "https://yam.example:8443/base"
+// TestWebhookPayloadShapes verifies the payload struct per media shape,
+// including which shapes skip (ok=false).
+func TestWebhookPayloadShapes(t *testing.T) {
+	tm := time.Date(2026, 5, 10, 20, 0, 0, 0, time.UTC)
+	// Skipping shapes.
 	for _, tt := range []struct {
-		next string
-		want string
+		name string
+		item model.WatchItem
 	}{
-		{"https://yam.example:8443/base/api/?page=2", "https://yam.example:8443/base/api/?page=2"},
-		{"HTTPS://YAM.EXAMPLE:8443/other", "HTTPS://YAM.EXAMPLE:8443/other"},
-		{"/api/?page=2", "https://yam.example:8443/base/api/?page=2"},
-		{"https://evil.example/api/", ""},
-		{"http://yam.example:8443/api/", ""},
-		{"https://yam.example:9999/api/", ""},
-		{"https://yam.example/api/", ""},
-		{"x", ""},
-		{"", ""},
-		{"://bad", ""},
+		{"movie-no-tmdb", model.WatchItem{IDs: model.IDs{IMDB: "tt0"}, MediaType: "movie", WatchedAt: tm}},
+		{"bare-show", model.WatchItem{IDs: model.IDs{TMDB: 5}, MediaType: "show", WatchedAt: tm}},
+		{"podcast", model.WatchItem{IDs: model.IDs{TMDB: 5}, MediaType: "podcast", WatchedAt: tm}},
+		{"episode-no-tmdb", model.WatchItem{IDs: model.IDs{IMDB: "tt0"}, MediaType: "episode", Season: 1, Episode: 2, WatchedAt: tm}},
+		{"episode-s0e0", model.WatchItem{IDs: model.IDs{TMDB: 5}, MediaType: "episode", WatchedAt: tm}},
 	} {
-		if got := resolveNext(base, tt.next); got != tt.want {
-			t.Fatalf("next %q: got %q want %q", tt.next, got, tt.want)
+		if w, ok := webhookPayload(tt.item); ok {
+			t.Fatalf("%s must skip, got %#v", tt.name, w)
 		}
 	}
-	// Default ports compare equal to explicit ones.
-	if got := resolveNext("http://h", "http://h:80/x"); got == "" {
-		t.Fatal("explicit :80 must match default http port")
+	// Movie keeps tmdb (+imdb when present) and ignores the watched date.
+	movie := model.WatchItem{
+		IDs:       model.IDs{TMDB: 27205, IMDB: "tt0133093"},
+		MediaType: "movie",
+		Title:     "M",
+		Season:    9,
+		Episode:   8,
+		WatchedAt: tm,
+	}
+	w, ok := webhookPayload(movie)
+	if !ok {
+		t.Fatal("movie with TMDB must push")
+	}
+	if w.Event != "Stop" {
+		t.Fatalf("event=%q", w.Event)
+	}
+	if w.Item.Type != "Movie" || w.Item.ParentIndexNumber != nil || w.Item.IndexNumber != nil {
+		t.Fatalf("item=%+v", w.Item)
+	}
+	if w.Item.ProviderIds["Tmdb"] != "27205" || w.Item.ProviderIds["Imdb"] != "tt0133093" {
+		t.Fatalf("ids=%v", w.Item.ProviderIds)
+	}
+	if played, ok := w.Item.UserData["Played"]; !ok || played != true {
+		t.Fatalf("userData=%v", w.Item.UserData)
+	}
+	// Movie without IMDb omits the Imdb id.
+	plain, ok := webhookPayload(model.WatchItem{IDs: model.IDs{TMDB: 27205}, MediaType: "movie", WatchedAt: tm})
+	_, present := plain.Item.ProviderIds["Imdb"]
+	if !ok || present {
+		t.Fatalf("bare movie ids=%v", plain.Item.ProviderIds)
+	}
+	// Episode numbering rides season/episode and the series TMDB block.
+	ep := model.WatchItem{IDs: model.IDs{TMDB: 155, IMDB: "tt2339"}, MediaType: "episode",
+		Title: "S", Season: 2, Episode: 3, WatchedAt: tm}
+	we, ok := webhookPayload(ep)
+	if !ok {
+		t.Fatal("numbered episode with TMDB must push")
+	}
+	if we.Item.Type != "Episode" || we.Item.SeriesName != "S" {
+		t.Fatalf("item=%+v", we.Item)
+	}
+	if *we.Item.ParentIndexNumber != 2 || *we.Item.IndexNumber != 3 {
+		t.Fatalf("numbering=%d,%d", *we.Item.ParentIndexNumber, *we.Item.IndexNumber)
+	}
+	if len(we.Item.ProviderIds) != 1 || we.Item.ProviderIds["Imdb"] != "tt2339" {
+		t.Fatalf("episode item ids=%v, only Imdb resolves episodes", we.Item.ProviderIds)
+	}
+	if we.Series.ProviderIds["Tmdb"] != "155" {
+		t.Fatalf("series=%+v", we.Series)
+	}
+	// Episode with zero WatchedAt still pushes: the webhook stamps upstream now.
+	if _, ok := webhookPayload(model.WatchItem{IDs: model.IDs{TMDB: 155}, MediaType: "episode",
+		Season: 1, Episode: 1}); !ok {
+		t.Fatal("episode without WatchedAt must push")
 	}
 }
 
-// TestPushSkipsUnknownKind verifies unmapped media types send no requests.
-func TestPushSkipsUnknownKind(t *testing.T) {
-	n := 0
+// TestPushTokenEscape verifies the token is path-escaped, not host/auth.
+func TestPushTokenEscape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n++
+		if got := r.URL.EscapedPath(); got != "/webhook/jellyfin/a%2Fb" {
+			t.Errorf("escaped path=%q", got)
+		}
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
-	it := model.WatchItem{IDs: model.IDs{TMDB: 5}, MediaType: "podcast", WatchedAt: time.Now()}
-	if delivered, err := New(srv.URL, "t").Push(context.Background(), []model.WatchItem{it}); err != nil {
-		t.Fatal(err)
-	} else if len(delivered) != 0 {
-		t.Fatalf("delivered=%d want 0", len(delivered))
-	}
-	if n != 0 {
-		t.Fatalf("requests=%d want 0", n)
+	if delivered, err := New(srv.URL, "a/b").Push(context.Background(),
+		[]model.WatchItem{item("movie", 1)}); err != nil || len(delivered) != 1 {
+		t.Fatalf("delivered=%d err=%v", len(delivered), err)
 	}
 }
 
@@ -111,52 +135,6 @@ func TestPushTransportErrors(t *testing.T) {
 	}
 	if _, err := New(closedURL(t), "t").Push(ctx, it); err == nil {
 		t.Fatal("closed server must fail Do")
-	}
-}
-
-// TestFromItemEdges verifies zero IDs fail and odd shapes normalize.
-func TestFromItemEdges(t *testing.T) {
-	if _, ok := fromItem(yamItem{}); ok {
-		t.Fatal("zero MediaID must fail")
-	}
-	w, ok := fromItem(yamItem{Source: "tmdb", MediaType: "episode", MediaID: 7, Title: "E", EndDate: "bogus"})
-	if !ok || w.MediaType != "show" || w.IDs.TMDB != 7 || !w.WatchedAt.IsZero() {
-		t.Fatalf("got %+v,%v", w, ok)
-	}
-}
-
-// TestHistoryTransportErrors verifies request build/Do failures surface.
-func TestHistoryTransportErrors(t *testing.T) {
-	ctx := context.Background()
-	if _, err := New("http://bad-\x7f-host", "t").History(ctx, time.Time{}); err == nil {
-		t.Fatal("bad URL must fail")
-	}
-	if _, err := New(closedURL(t), "t").History(ctx, time.Time{}); err == nil {
-		t.Fatal("closed server must fail")
-	}
-}
-
-// TestHistorySkipsZeroIDAndOld verifies zero IDs skip and since filters old.
-func TestHistorySkipsZeroIDAndOld(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/media/movie/") {
-			fmt.Fprint(w, `{"results":[
-				{"source":"tmdb","media_type":"movie","media_id":0,"title":"Zero","end_date":"2026-05-10"},
-				{"source":"tmdb","media_type":"movie","media_id":1,"title":"Old","end_date":"2020-01-01"},
-				{"source":"tmdb","media_type":"movie","media_id":2,"title":"New","end_date":"2026-05-11"}
-			],"next":null}`)
-			return
-		}
-		fmt.Fprint(w, `{"results":[],"next":null}`)
-	}))
-	defer srv.Close()
-	since := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	got, err := New(srv.URL, "t").History(context.Background(), since)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].IDs.TMDB != 2 {
-		t.Fatalf("got=%+v", got)
 	}
 }
 
@@ -283,57 +261,5 @@ func TestDoWithRetrySecondBuildFails(t *testing.T) {
 		return http.NewRequestWithContext(ctx, "GET", srv.URL+"/x", nil)
 	}); err != buildErr {
 		t.Fatalf("second build err: %v calls=%d", err, calls)
-	}
-}
-
-// TestHistoryFollowsValidNext verifies same-origin next URLs are followed.
-func TestHistoryFollowsValidNext(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/media/movie/") {
-			if r.URL.Query().Get("offset") == "0" {
-				fmt.Fprintf(w, `{"results":[{"source":"tmdb","media_type":"movie","media_id":1,"title":"A","end_date":"2026-05-10"}],"next":%q}`, "/api/v1/media/movie/?limit=200&offset=1")
-				return
-			}
-			fmt.Fprint(w, `{"results":[{"source":"tmdb","media_type":"movie","media_id":2,"title":"B","end_date":"2026-05-11"}],"next":null}`)
-			return
-		}
-		fmt.Fprint(w, `{"results":[],"next":null}`)
-	}))
-	defer srv.Close()
-	got, err := New(srv.URL, "t").History(context.Background(), time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].IDs.TMDB != 1 || got[1].IDs.TMDB != 2 {
-		t.Fatalf("got=%v want paged next follow", got)
-	}
-}
-
-// TestHistoryDupNextBreaks verifies repeated continuations stop the loop.
-func TestHistoryDupNextBreaks(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/media/movie/") {
-			fmt.Fprint(w, `{"results":[{"source":"tmdb","media_type":"movie","media_id":1,"title":"A","end_date":"2026-05-10"}],"next":"x"}`)
-			return
-		}
-		fmt.Fprint(w, `{"results":[],"next":null}`)
-	}))
-	defer srv.Close()
-	got, err := New(srv.URL, "t").History(context.Background(), time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got=%v want 2 (initial + offset retry, then dup break)", got)
-	}
-}
-
-// TestResolveNextParseErrors verifies unparsable base/next URLs fall back to offset paging.
-func TestResolveNextParseErrors(t *testing.T) {
-	if got := resolveNext("http://[::1", "https://yam.example/api/"); got != "" {
-		t.Fatalf("bad base: got %q want empty", got)
-	}
-	if got := resolveNext("https://yam.example", "https://yam.example/x\x7f"); got != "" {
-		t.Fatalf("bad next: got %q want empty", got)
 	}
 }

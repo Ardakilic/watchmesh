@@ -22,6 +22,9 @@ func checkHeaders(t *testing.T, r *http.Request) {
 	if r.Header.Get("Authorization") != "Bearer tok" {
 		t.Fatalf("auth=%q", r.Header.Get("Authorization"))
 	}
+	if r.Header.Get("User-Agent") != model.UserAgent {
+		t.Fatalf("ua=%q", r.Header.Get("User-Agent"))
+	}
 }
 
 // TestHistorySkipsWhenUnchanged verifies no all-items fetch when cursors are old.
@@ -61,9 +64,8 @@ func TestHistoryFetchesWhenNewer(t *testing.T) {
 			if r.URL.Query().Get("date_from") == "" {
 				t.Error("missing date_from")
 			}
-			if strings.HasSuffix(r.URL.Path, "/watching") {
-				fmt.Fprint(w, `{"movies":[]}`)
-				return
+			if !strings.HasSuffix(r.URL.Path, "/completed") {
+				t.Errorf("movies fetch only the completed bucket, got %s", r.URL.Path)
 			}
 			fmt.Fprint(w, `{"movies":[{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"M","year":2007,"ids":{"simkl":1015859}}}]}`)
 		case strings.HasPrefix(r.URL.Path, "/sync/all-items/shows/"):

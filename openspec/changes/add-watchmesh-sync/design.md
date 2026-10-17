@@ -125,10 +125,10 @@ for graceful stop; Sync runs per tick, no partial state write on cancel.
 
 | Conn | Auth (CLI `auth`) | History | Push |
 |---|---|---|---|
-| Trakt `https://api.trakt.tv` | Device: `POST /oauth/device/code {client_id}` → poll `POST /oauth/device/token {code,client_id,client_secret}` | `GET /sync/history/{movies\|episodes}?start_at=&page=&limit=` headers `trakt-api-key`+`Bearer`+`trakt-api-version: 2` | `POST /sync/history` |
-| Simkl `https://api.simkl.com` | PIN: `GET /oauth/pin?client_id` → poll `GET /oauth/pin/{user_code}` every `interval` (5y token) | `GET /sync/activities` dirty-check, then `GET /sync/all-items/{movies\|shows\|anime}/…?date_from=` — never timer-poll all-items or `client_id` is suspended | `POST /sync/history` (10 GET/s, 1 POST/s) |
-| Ryot `{base}/backend/graphql` | `Authorization: Bearer <token>` — VERIFY live: token screen / `docs.ryot.io/guides/authentication.html` | Best-effort GraphQL query (introspect live: collection/user-media list, `page/limit`) — gaps never fail sync | GraphQL mutation (introspect live; candidate `updateSeenHistory`) |
-| Yamtrack `{base}` | Token from web UI (Integrations); header form VERIFY live (`Bearer` vs `X-API-Key` vs `?token=`) | VERIFY live: paginated media/history GET if present, else source-only mode | Webhook-style POST per item (inspect `views.py`/webhook live); loop single items, no batch assumption |
+| Trakt `https://api.trakt.tv` | Device: `POST /oauth/device/code {client_id}` → poll `POST /oauth/device/token {code,client_id,client_secret}` (verified statuses below) | `GET /sync/history/{movies\|episodes}?start_at=&page=&limit=` headers `trakt-api-key`+`Bearer`+`trakt-api-version: 2` | `POST /sync/history` |
+| Simkl `https://api.simkl.com` | PIN: `GET /oauth/pin?client_id` → poll `GET /oauth/pin/{user_code}` every `interval`, bounded by `expires_in` (5y token) | `GET /sync/activities` dirty-check, then `GET /sync/all-items/{movies\|shows\|anime}/…?date_from=` (movies only the `completed` bucket) — never timer-poll all-items or `client_id` is suspended | `POST /sync/history` (10 GET/s, 1 POST/s) |
+| Ryot `{base}/backend/graphql` | `Authorization: Bearer <token>`; validated by a `userDetails` probe (field maps from pinned v10.5.3 sources, Oct 2026 — not yet a live instance) | Best-effort: paged `userMetadataList` (MOVIE+SHOW lots, TMDB source filter) → chunked aliased `metadataDetails`+`userMetadataDetails` reads — gaps never fail sync | Per `(lot,tmdb)` bucket: `metadataSearch` → strict `metadataDetails` identifier match → chunked `deployBulkMetadataProgressUpdate` (→ true) |
+| Yamtrack `{base}` | Integration token from web UI, validated by an empty-body `POST {base}/webhook/jellyfin/{token}` probe (400 valid / 401 invalid; dev-branch sources, Oct 2026) | No released REST history endpoint — webhook entries are not listable; documented no-op, read gaps `empty,nil` (read-only there) | Per-item `POST {base}/webhook/jellyfin/{token}` Jellyfin stop event (no batch; token in path, no header) |
 
 Trakt push (confirmed shape):
 
@@ -144,16 +144,47 @@ Simkl push (confirmed shape):
  "shows":[{"ids":{"simkl":1411674},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-05-13T19:00:00Z"}]}]}]}
 ```
 
-Ryot/Yamtrack payloads are STUBS until live introspection (see nuances.md):
-Ryot candidate `mutation($i:UpdateSeenInput!){updateSeenHistory(i:$i)}`
-with `{metadataId:"tmdb://movie/27205", state:"Completed", finishedOn}`.
-Yamtrack candidate `{"source":"tmdb","media_type":"movie","media_id":27205,
-"status":"Completed","end_date":"2026-09-19"}`. Confirm enum/field names
-against the running instance during apply; keep mapping isolated per
-connector so corrections stay one-file diffs.
+Simkl 429 semantics (verified): body `error` distinguishes burst from daily
+limits — `rate_limit` (and unknown/empty bodies) retry silently after a
+fixed 1s wait; `user_limit_exceeded`/`app_limit_exceeded` are fatal with the
+reset seconds in the message (Retry-After is ignored — that header is the
+daily reset). `date_from` is trusted; seen-hash dedupe absorbs over-delivery.
 
-`auth` prints URL + polls for Trakt/Simkl; Ryot/Yamtrack validate token via
-one GET. No inbound ports in v1. HTTP client: stdlib `net/http` with
+Trakt device-poll statuses (verified): 400 pending · 429 slow_down (+5s
+interval bump, `Retry-After` honored, wait capped at 60s) ·
+404/409/410/418/401/anything else terminal, no retry. Device/PIN polling is
+bounded by the code's `expires_in` and reports expiry instead of a raw
+context error.
+
+Ryot push (verified against v10.5.3 sources — GraphQL enums are
+SCREAMING_SNAKE_CASE; list responses wrap in `{cacheId, response{…}}`;
+internal metadata ids read `met_…`):
+
+```graphql
+query($i: MetadataSearchInput!) { metadataSearch(input: $i) { response { items details { totalItems nextPage } } } }
+# variables {"i":{"lot":"MOVIE","source":"TMDB","search":{"query":"<first title>","take":10}}}
+query($i: String!) { metadataDetails(metadataId: $i) { response { identifier lot source } } }
+# resolve rule: source == "TMDB" && identifier == the plain numeric TMDB id
+mutation($i: [MetadataProgressUpdateInput!]!) { deployBulkMetadataProgressUpdate(input: $i) }
+# per item {"metadataId":"met_…","change":{"createNewCompleted":{"timestamp":"…Z","showSeasonNumber":2,"showEpisodeNumber":3}}}
+# showSeasonNumber/showEpisodeNumber ride only on episodes; movies stay bare.
+```
+
+Yamtrack stop event (verified against dev-branch
+`src/integrations/webhooks/{jellyfin,tv,movie}.py`):
+
+```json
+{"Event":"Stop",
+ "Item":{"Type":"Movie","ProviderIds":{"Tmdb":"27205","Imdb":"tt0133093"},"UserData":{"Played":true}}}
+```
+
+Episodes: `Item.Type:"Episode"`, `ParentIndexNumber`+`IndexNumber`,
+`Series:{"ProviderIds":{"Tmdb":"155"}}`, and at Item level only `Imdb` —
+upstream treats Item-level `Tvdb` as a TVDB episode id and would bind an
+unrelated record. Provider ids are strings upstream.
+
+`auth` prints URL + polls for Trakt/Simkl; Ryot/Yamtrack validate via the
+probes above. No inbound ports in v1. HTTP client: stdlib `net/http` with
 `Authorization: Bearer` header + `encoding/json` bodies; backoff on 429.
 
 ## 8. Ops: image, compose, scheduling
@@ -214,6 +245,7 @@ defer srv.Close()
 
 1. Re-run Context7 `resolve`+`query` for Go/Docker/pgx/migrate + each watch API.
 2. Pin `golang:1.27.1-bookworm` + distroless digest at apply time.
-3. Introspect live Ryot GraphQL schema + Yamtrack webhook/views before
-   finalizing those two connectors; keep them target-first.
-4. Verify Trakt rate limits live; keep 429 backoff everywhere.
+3. Ryot/Yamtrack introspection is done in pinned upstream sources (Ryot
+   v10.5.3, Yamtrack dev branch, Oct 2026); when a live instance is
+   available, re-verify field maps + webhook ingestion end-to-end.
+4. Trakt limits confirmed: 500 GET/5min + 1 POST/s. Keep 429 backoff everywhere.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -46,17 +47,33 @@ func (c *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-// setHeaders sets Simkl API key, Bearer, and JSON headers on r.
+// setHeaders sets Simkl API key, Bearer, JSON, and watchmesh UA headers on r.
 func (c *Client) setHeaders(r *http.Request) {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
 	r.Header.Set("simkl-api-key", c.ClientID)
+	r.Header.Set("User-Agent", model.UserAgent)
 	if c.Token != "" {
 		r.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 }
 
-// doWithRetry runs build once, and on 429 waits Retry-After once then retries once.
+// addAppQuery stamps the app_name/app_version query params Simkl uses to
+// attribute requests to the app. Call right after building the request.
+func addAppQuery(r *http.Request) {
+	q := r.URL.Query()
+	q.Set("app_name", model.AppName)
+	q.Set("app_version", model.AppVersion)
+	r.URL.RawQuery = q.Encode()
+}
+
+// doWithRetry runs build once. On a 429 it decodes the body's error kind and
+// branches: user_limit_exceeded and app_limit_exceeded are Simkl's daily
+// AUTH V2/V1 caps whose Retry-After counts down to the daily reset (up to a
+// day), so they surface as an error instead of sleeping; anything else — the
+// burst rate_limit kind, an unreadable body, or no error field — retries once
+// after a fixed one-second wait, because Retry-After is unreliable for
+// bursts (usually absent) and lethal if honored blindly (daily reset).
 func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Request, error)) (*http.Response, error) {
 	req, err := build()
 	if err != nil {
@@ -69,19 +86,22 @@ func doWithRetry(ctx context.Context, hc *http.Client, build func() (*http.Reque
 	if resp.StatusCode != http.StatusTooManyRequests {
 		return resp, nil
 	}
-	secs := 1
-	if ra := resp.Header.Get("Retry-After"); ra != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(ra)); err == nil && n >= 0 {
-			secs = n
-		}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4<<10)); rerr == nil && len(b) > 0 {
+		_ = json.Unmarshal(b, &body)
 	}
 	resp.Body.Close()
-	if secs > 0 {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(time.Duration(secs) * time.Second):
-		}
+	switch body.Error {
+	case "user_limit_exceeded", "app_limit_exceeded":
+		ra := strings.TrimSpace(resp.Header.Get("Retry-After"))
+		return nil, fmt.Errorf("simkl daily limit %s: resets in %ss", body.Error, ra)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(time.Second):
 	}
 	req2, err := build()
 	if err != nil {
@@ -153,6 +173,7 @@ func (c *Client) activities(ctx context.Context) (map[string]activityCursor, err
 			return nil, err
 		}
 		c.setHeaders(req)
+		addAppQuery(req)
 		return req, nil
 	})
 	if err != nil {
@@ -170,11 +191,40 @@ func (c *Client) activities(ctx context.Context) (map[string]activityCursor, err
 }
 
 // simklIDs is the Simkl ids object shared by movie/show/push items.
+// TMDB/TVDB decode through flexInt: responses quote external ids
+// ("tmdb":"693134"), so a plain int would fail every response.
 type simklIDs struct {
-	Simkl int    `json:"simkl,omitempty"`
-	IMDB  string `json:"imdb,omitempty"`
-	TMDB  int    `json:"tmdb,omitempty"`
-	TVDB  int    `json:"tvdb,omitempty"`
+	Simkl int     `json:"simkl,omitempty"`
+	IMDB  string  `json:"imdb,omitempty"`
+	TMDB  flexInt `json:"tmdb,omitempty"`
+	TVDB  flexInt `json:"tvdb,omitempty"`
+}
+
+// flexInt decodes a Simkl external id that may arrive as a JSON string,
+// number, null, or empty string; unparseable values decode to 0 rather than
+// poisoning the whole response (a 0 id simply matches nothing downstream).
+// Requests re-encode plain integers.
+type flexInt int
+
+// UnmarshalJSON accepts string and numeric JSON spellings.
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	var s string
+	if b[0] == '"' {
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+	} else {
+		s = string(b)
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+		*f = flexInt(n)
+	} else {
+		*f = 0
+	}
+	return nil
 }
 
 // notFoundEntry is one unresolved element in a push response.
@@ -213,19 +263,26 @@ type allItemsEntry struct {
 
 // toIDs converts Simkl ids to model IDs.
 func toIDs(s simklIDs) model.IDs {
-	return model.IDs{Simkl: s.Simkl, IMDB: s.IMDB, TMDB: s.TMDB, TVDB: s.TVDB}
+	return model.IDs{Simkl: s.Simkl, IMDB: s.IMDB, TMDB: int(s.TMDB), TVDB: int(s.TVDB)}
 }
 
-// fetchCategory GETs completed+watching buckets for cat and emits only
-// actually-watched entries: movies with non-empty last_watched_at,
-// episodes with non-empty episode watched_at. Everything else
-// (plan-to-watch, dropped, never-watched, zero timestamps) is dropped.
-// Entries older than since are filtered. Entries appearing in both
-// buckets emit once (cross-bucket dedupe by Hash).
+// fetchCategory GETs the watched buckets for cat and emits only
+// actually-watched entries: movies with non-empty last_watched_at, episodes
+// with non-empty episode watched_at. Movies accept only the completed bucket
+// (the OpenAPI rejects movies/watching); shows and anime pull completed +
+// watching, and entries landing in both buckets emit once (Hash dedupe).
+// A non-zero since sends date_from and trusts the server to filter by
+// watchlist-entry change, so entries older than since can still arrive
+// (over-delivery) — they are emitted anyway, and the engine's per-target
+// seen-hash diff drops anything already pushed.
 func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time) ([]model.WatchItem, error) {
 	var out []model.WatchItem
 	seen := map[string]struct{}{}
-	for _, bucket := range []string{"completed", "watching"} {
+	buckets := []string{"completed", "watching"}
+	if cat == "movies" {
+		buckets = []string{"completed"}
+	}
+	for _, bucket := range buckets {
 		u := c.BaseURL + "/sync/all-items/" + cat + "/" + bucket + "?extended=full&episode_watched_at=yes&include_all_episodes=original"
 		if !since.IsZero() {
 			u += "&date_from=" + since.UTC().Format(time.RFC3339)
@@ -237,6 +294,7 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 				return nil, err
 			}
 			c.setHeaders(req)
+			addAppQuery(req)
 			return req, nil
 		})
 		if err != nil {
@@ -256,7 +314,7 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 		if cat == "movies" {
 			for _, e := range list {
 				at := parseTime(e.LastWatchedAt)
-				if at.IsZero() || (!since.IsZero() && at.Before(since)) {
+				if at.IsZero() {
 					continue
 				}
 				m := e.Movie
@@ -281,7 +339,7 @@ func (c *Client) fetchCategory(ctx context.Context, cat string, since time.Time)
 			for _, sn := range e.Seasons {
 				for _, ep := range sn.Episodes {
 					at := parseTime(ep.WatchedAt)
-					if at.IsZero() || (!since.IsZero() && at.Before(since)) {
+					if at.IsZero() {
 						continue
 					}
 					it := model.WatchItem{
@@ -370,11 +428,11 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 		switch it.MediaType {
 		case "movie":
 			body.Movies = append(body.Movies, pushMovie{WatchedAt: at, IDs: simklIDs{
-				Simkl: it.IDs.Simkl, IMDB: it.IDs.IMDB, TMDB: it.IDs.TMDB, TVDB: it.IDs.TVDB,
+				Simkl: it.IDs.Simkl, IMDB: it.IDs.IMDB, TMDB: flexInt(it.IDs.TMDB), TVDB: flexInt(it.IDs.TVDB),
 			}})
 			delivered = append(delivered, it)
 		case "episode", "show":
-			ids := simklIDs{Simkl: it.IDs.Simkl, IMDB: it.IDs.IMDB, TMDB: it.IDs.TMDB, TVDB: it.IDs.TVDB}
+			ids := simklIDs{Simkl: it.IDs.Simkl, IMDB: it.IDs.IMDB, TMDB: flexInt(it.IDs.TMDB), TVDB: flexInt(it.IDs.TVDB)}
 			if it.MediaType == "show" && it.Season == 0 && it.Episode == 0 {
 				body.Shows = append(body.Shows, pushShow{IDs: ids})
 				delivered = append(delivered, it)
@@ -395,6 +453,7 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 			return nil, err
 		}
 		c.setHeaders(req)
+		addAppQuery(req)
 		return req, nil
 	})
 	if err != nil {
@@ -446,10 +505,10 @@ func unresolved(ids model.IDs, nfs []notFoundEntry) bool {
 		if nf.IMDB != "" && nf.IMDB == ids.IMDB {
 			return true
 		}
-		if nf.TMDB != 0 && nf.TMDB == ids.TMDB {
+		if nf.TMDB != 0 && int(nf.TMDB) == ids.TMDB {
 			return true
 		}
-		if nf.TVDB != 0 && nf.TVDB == ids.TVDB {
+		if nf.TVDB != 0 && int(nf.TVDB) == ids.TVDB {
 			return true
 		}
 	}

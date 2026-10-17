@@ -34,7 +34,7 @@ flowchart LR
 
 ## Retries + state (5 lines)
 
-1. Every connector retries once on HTTP 429, waiting `Retry-After` (default 1s).
+1. Every connector retries once on HTTP 429, waiting `Retry-After` (default 1s). Simkl's daily caps surface as a fatal error instead (fixed 1s wait for burst `rate_limit` bodies).
 2. Only delivered items are marked seen — per target, keyed by connection name.
 3. Any failure/skip holds the cursor; the next tick covers exactly the remainder.
 4. Cursor advances to the window-end only when every target fully succeeds.
@@ -44,9 +44,9 @@ flowchart LR
 
 | Connector | Status |
 |---|---|
-| Trakt `https://api.trakt.tv` | Confirmed: device auth, `GET`+`POST /sync/history` |
-| Simkl `https://api.simkl.com` | Confirmed — always dirty-check `GET /sync/activities` before `/sync/all-items`, never timer-poll it |
-| Ryot `{base}/backend/graphql` | STUB — candidate `updateSeenHistory`, history best-effort (task 5.3) |
-| Yamtrack `{base}` | STUB — single POST per item, header form unconfirmed (task 6.3) |
+| Trakt `https://api.trakt.tv` | Confirmed: device auth, `GET`+`POST /sync/history` (500 GET/5min + 1 POST/s) |
+| Simkl `https://api.simkl.com` | Confirmed — always dirty-check `GET /sync/activities` before `/sync/all-items`, never timer-poll it; `date_from` trusted, daily caps fatal |
+| Ryot `{base}/backend/graphql` | Reworked (field maps from pinned v10.5.3 sources, Oct 2026): TMDB search → strict match → bulk progress deploy; history best-effort |
+| Yamtrack `{base}` | Reworked (field maps from pinned dev sources, Oct 2026): per-item Jellyfin-webhook POST; token in path; no REST history (read-only there) |
 
-Limits: Trakt ~1000 GET/5min + 1 POST/s; Simkl 10 GET/s, 1 POST/s. Migrations embed in the binary and run on boot; dirty DB fails fast — `migrate force <last_good>` manually, never auto. Details: `AGENTS.md`, `openspec/changes/add-watchmesh-sync/`.
+Limits: Trakt 500 GET/5min + 1 POST/s; Simkl 10 GET/s bursts, 1 POST/s, daily caps fatal. Migrations embed in the binary and run on boot; dirty DB fails fast — `migrate force <last_good>` manually, never auto. Details: `AGENTS.md`, `openspec/changes/add-watchmesh-sync/`.
