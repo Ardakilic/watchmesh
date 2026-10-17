@@ -301,14 +301,31 @@ func TestAuthEdges(t *testing.T) {
 			t.Fatalf("body %q must fail", body)
 		}
 	}
-	// Token endpoint hard error.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-	}))
-	_, err := New(srv.URL, "c", "s", "").PollDeviceToken(ctx, "dev", 0)
-	srv.Close()
-	if err == nil {
-		t.Fatal("token 500 must fail")
+	// Token endpoint terminal statuses fail on the first request, message included.
+	for _, tt := range []struct {
+		status int
+		want   string
+	}{
+		{http.StatusNotFound, "invalid or expired"},
+		{http.StatusConflict, "already issued"},
+		{http.StatusGone, "expired"},
+		{http.StatusTeapot, "denied"},
+		{http.StatusUnauthorized, "status 401"},
+		{http.StatusBadGateway, "status 502"},
+	} {
+		var hits int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(tt.status)
+		}))
+		_, err := New(srv.URL, "c", "s", "").PollDeviceToken(ctx, "dev", 5*time.Second)
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("status %d: err=%v want %q", tt.status, err, tt.want)
+		}
+		if hits != 1 {
+			t.Fatalf("status %d: hits=%d terminal statuses must not retry", tt.status, hits)
+		}
 	}
 	// Cancelled context stops the poll loop immediately.
 	cancelled, cancel := context.WithCancel(ctx)
@@ -331,6 +348,26 @@ func TestAuthEdges(t *testing.T) {
 	if err != nil || tok != "tok" || n != 2 {
 		t.Fatalf("tok=%q err=%v n=%d", tok, err, n)
 	}
+	// slow_down with Retry-After: 0 retries immediately (the +5s bump math
+	// itself is unit-tested in TestSlowDownWait; honoring it here would add
+	// ≥10s of sleep).
+	var fast int
+	srvFast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fast++
+		if fast == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(429)
+			return
+		}
+		fmt.Fprint(w, `{"access_token":"tok"}`)
+	}))
+	defer srvFast.Close()
+	if tok, err := New(srvFast.URL, "c", "s", "").PollDeviceToken(ctx, "dev", time.Hour); err != nil || tok != "tok" {
+		t.Fatalf("fast retry: tok=%q err=%v", tok, err)
+	}
+	if fast != 2 {
+		t.Fatalf("fast=%d want 2 requests", fast)
+	}
 	// Cancel during the sleep aborts.
 	srv3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
@@ -340,6 +377,34 @@ func TestAuthEdges(t *testing.T) {
 	time.AfterFunc(20*time.Millisecond, cancel3)
 	if _, err := New(srv3.URL, "c", "s", "").PollDeviceToken(ctx3, "dev", 5*time.Second); err == nil {
 		t.Fatal("cancel during sleep must fail")
+	}
+}
+
+// TestSlowDownWait verifies the slow_down wait math: +5s interval bump,
+// numeric Retry-After override (trimmed), capped at maxPollWait.
+func TestSlowDownWait(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		interval time.Duration
+		retry    string
+		wantNext time.Duration
+		wantWait time.Duration
+	}{
+		{"bumps-by-5s", time.Second, "", 6 * time.Second, 6 * time.Second},
+		{"large-interval-capped", time.Minute, "", 65 * time.Second, maxPollWait},
+		{"retry-after-honored", time.Second, "1", 6 * time.Second, time.Second},
+		{"retry-after-capped", time.Second, "999999", 6 * time.Second, maxPollWait},
+		{"retry-after-trimmed", time.Second, " 2 ", 6 * time.Second, 2 * time.Second},
+		{"negative-falls-back", time.Second, "-3", 6 * time.Second, 6 * time.Second},
+		{"garbage-falls-back", time.Second, "soon", 6 * time.Second, 6 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			next, wait := slowDownWait(tt.interval, tt.retry)
+			if next != tt.wantNext || wait != tt.wantWait {
+				t.Fatalf("slowDownWait(%v, %q) = (%v, %v), want (%v, %v)",
+					tt.interval, tt.retry, next, wait, tt.wantNext, tt.wantWait)
+			}
+		})
 	}
 }
 

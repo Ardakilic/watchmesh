@@ -86,3 +86,27 @@ func TestPollRespectsInterval(t *testing.T) {
 		t.Fatalf("polls=%d want 3", n)
 	}
 }
+
+// TestDeviceAuthExpires verifies polling stops at the code's expires_in
+// deadline and reports expiry instead of a raw context error.
+func TestDeviceAuthExpires(t *testing.T) {
+	var polls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/oauth/device/code":
+			fmt.Fprint(w, `{"device_code":"dev","user_code":"AB","verification_url":"https://trakt.tv/activate","expires_in":1,"interval":0}`)
+		case "/oauth/device/token":
+			polls++
+			w.WriteHeader(400) // always pending
+		}
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, "cid", "sec", "").DeviceAuth(context.Background(), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "trakt device code expired after 1s") {
+		t.Fatalf("err=%v want expiry after 1s", err)
+	}
+	if polls < 1 {
+		t.Fatal("poll never ran")
+	}
+}

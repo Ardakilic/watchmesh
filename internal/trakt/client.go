@@ -42,11 +42,12 @@ func (c *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-// setHeaders sets Trakt auth, version, and JSON headers on r.
+// setHeaders sets Trakt auth, version, JSON, and watchmesh UA headers on r.
 func (c *Client) setHeaders(r *http.Request) {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
 	r.Header.Set("trakt-api-key", c.ClientID)
+	r.Header.Set("User-Agent", model.UserAgent)
 	if c.Token != "" {
 		r.Header.Set("Authorization", "Bearer "+c.Token)
 	}

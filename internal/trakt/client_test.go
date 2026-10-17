@@ -13,7 +13,7 @@ import (
 	"github.com/watchmesh/watchmesh/internal/model"
 )
 
-// checkHeaders asserts the Trakt key, Bearer, and version headers.
+// checkHeaders asserts the Trakt key, Bearer, version, and watchmesh UA headers.
 func checkHeaders(t *testing.T, r *http.Request) {
 	t.Helper()
 	if r.Header.Get("trakt-api-key") != "cid" {
@@ -24,6 +24,9 @@ func checkHeaders(t *testing.T, r *http.Request) {
 	}
 	if r.Header.Get("trakt-api-version") != "2" {
 		t.Fatalf("version=%q", r.Header.Get("trakt-api-version"))
+	}
+	if r.Header.Get("User-Agent") != model.UserAgent {
+		t.Fatalf("ua=%q", r.Header.Get("User-Agent"))
 	}
 }
 
