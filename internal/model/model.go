@@ -9,6 +9,16 @@ import (
 	"time"
 )
 
+// AppName is the client name watchmesh reports to upstream services
+// (User-Agent, Simkl app_name).
+const AppName = "watchmesh"
+
+// AppVersion is the connector version reported upstream; bump per release.
+const AppVersion = "0.1.0"
+
+// UserAgent is the User-Agent header value used on connector requests.
+const UserAgent = AppName + "/" + AppVersion
+
 // IDs carries stable external identifiers for one media item.
 type IDs struct {
 	Trakt int
