@@ -179,6 +179,22 @@ func TestPushTransportErrors(t *testing.T) {
 	}
 }
 
+// TestPushCancelSurfaces verifies a cancelled context aborts Push with the
+// cancellation error instead of decoding as a clean empty push.
+func TestPushCancelSurfaces(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	srv, tp := pushRouter(nil, nil, deployOK())
+	defer srv.Close()
+	delivered, err := New(srv.URL, "t").Push(ctx, []model.WatchItem{item(1)})
+	if err == nil || !errors.Is(err, context.Canceled) || len(delivered) != 0 {
+		t.Fatalf("delivered=%v err=%v, want context.Canceled", delivered, err)
+	}
+	if tp.deploy != 0 {
+		t.Fatalf("deploys=%d, cancelled runs must not deploy", tp.deploy)
+	}
+}
+
 // retryScript answers each request (1-based): a non-empty value interrupts
 // with 429 and that Retry-After.
 type retryScript func(n int) string

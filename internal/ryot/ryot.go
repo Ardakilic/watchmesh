@@ -319,11 +319,18 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 			order = append(order, b)
 		}
 	}
+	var delivered []model.WatchItem
 	resolved := map[bucket]string{}
 	for _, b := range order {
 		// A resolve error OR an empty id (search found nothing/failed)
 		// skips the bucket for this run; the engine holds the cursor.
-		if id, err := c.resolve(ctx, b.lot, b.tmdb, titles[b]); err == nil && id != "" {
+		// A cancelled context is not a lookup failure: it aborts Push,
+		// so a cancelled run never reads as a clean empty push.
+		id, err := c.resolve(ctx, b.lot, b.tmdb, titles[b])
+		if err != nil && ctx.Err() != nil {
+			return delivered, ctx.Err()
+		}
+		if err == nil && id != "" {
 			resolved[b] = id
 		}
 	}
@@ -343,7 +350,6 @@ func (c *Client) Push(ctx context.Context, items []model.WatchItem) ([]model.Wat
 		}})
 		pushable = append(pushable, it)
 	}
-	var delivered []model.WatchItem
 	for start := 0; start < len(inputs); start += pushChunk {
 		end := min(start+pushChunk, len(inputs))
 		body, _ := json.Marshal(gqlReq{

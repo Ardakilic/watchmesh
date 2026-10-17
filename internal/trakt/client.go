@@ -212,14 +212,17 @@ func (c *Client) fetchPage(ctx context.Context, kind, u string) (entries []model
 		return nil, true, nil
 	}
 	for _, e := range list {
-		ids := model.IDs{Trakt: e.Episode.IDs.Trakt, TMDB: e.Episode.IDs.TMDB, TVDB: e.Episode.IDs.TVDB}
+		// The model carries ONE TMDB field and every consumer keys shows
+		// by it (simkl show payload ids, ryot SHOW-lot bucket, yamtrack
+		// series block), so episode items take the show-level TMDB and
+		// the episode-level one must not leak into it. Trakt/IMDB stay
+		// episode-specific (IMDB falls back to the show's value), TVDB
+		// stays episode-specific with a show fallback.
+		ids := model.IDs{Trakt: e.Episode.IDs.Trakt, TMDB: e.Show.IDs.TMDB, TVDB: e.Episode.IDs.TVDB}
 		if e.Episode.IDs.IMDB != "" {
 			ids.IMDB = e.Episode.IDs.IMDB
 		} else {
 			ids.IMDB = e.Show.IDs.IMDB
-		}
-		if ids.TMDB == 0 {
-			ids.TMDB = e.Show.IDs.TMDB
 		}
 		if ids.TVDB == 0 {
 			ids.TVDB = e.Show.IDs.TVDB
