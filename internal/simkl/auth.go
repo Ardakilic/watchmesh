@@ -3,6 +3,7 @@ package simkl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +38,7 @@ func (c *Client) RequestPIN(ctx context.Context) (*pinResp, error) {
 		return nil, err
 	}
 	c.setHeaders(req)
+	addAppQuery(req)
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return nil, err
@@ -77,6 +79,7 @@ func (c *Client) PollPINToken(ctx context.Context, userCode string, interval tim
 			return "", err
 		}
 		c.setHeaders(req)
+		addAppQuery(req)
 		resp, err := c.httpClient().Do(req)
 		if err != nil {
 			return "", err
@@ -104,7 +107,9 @@ func (c *Client) PollPINToken(ctx context.Context, userCode string, interval tim
 }
 
 // PINAuth prints the verification URL + code then polls per interval.
-// Returns the access token.
+// Polling is bounded by the PIN's expires_in seconds via a context deadline;
+// exhaustion yields an expiry error instead of a raw context error. Returns
+// the access token.
 func (c *Client) PINAuth(ctx context.Context, out io.Writer) (string, error) {
 	p, err := c.RequestPIN(ctx)
 	if err != nil {
@@ -116,5 +121,14 @@ func (c *Client) PINAuth(ctx context.Context, out io.Writer) (string, error) {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	return c.PollPINToken(ctx, p.UserCode, interval)
+	if p.ExpiresIn <= 0 {
+		return c.PollPINToken(ctx, p.UserCode, interval)
+	}
+	pollCtx, cancel := context.WithTimeout(ctx, time.Duration(p.ExpiresIn)*time.Second)
+	defer cancel()
+	tok, err := c.PollPINToken(pollCtx, p.UserCode, interval)
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return "", fmt.Errorf("simkl pin expired after %ds", p.ExpiresIn)
+	}
+	return tok, err
 }

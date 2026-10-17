@@ -90,7 +90,8 @@ func TestParseTimeZero(t *testing.T) {
 	}
 }
 
-// TestDoWithRetryEdges verifies build errors, passthrough, 429 retry, and cancel.
+// TestDoWithRetryEdges verifies build errors, passthrough, burst 429 retry,
+// daily-limit 429s, and cancel.
 func TestDoWithRetryEdges(t *testing.T) {
 	ctx := context.Background()
 	buildErr := errors.New("boom")
@@ -122,18 +123,22 @@ func TestDoWithRetryEdges(t *testing.T) {
 	if resp.StatusCode != 500 || hits != 1 {
 		t.Fatalf("status=%d hits=%d", resp.StatusCode, hits)
 	}
-	// 429 with Retry-After retries once.
+	// Burst 429 retries once after a fixed ~1s wait; the huge daily-reset
+	// Retry-After must be ignored.
 	hits = 0
 	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		if hits == 1 {
-			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Retry-After", "45000")
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
+			fmt.Fprint(w, `{"error":"rate_limit"}`)
 			return
 		}
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv2.Close()
+	start := time.Now()
 	resp, err = doWithRetry(ctx, srv2.Client(), func() (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, "GET", srv2.URL+"/x", nil)
 	})
@@ -144,7 +149,30 @@ func TestDoWithRetryEdges(t *testing.T) {
 	if resp.StatusCode != 200 || hits != 2 {
 		t.Fatalf("status=%d hits=%d", resp.StatusCode, hits)
 	}
-	// Second build fails after a 429.
+	if d := time.Since(start); d > 4*time.Second {
+		t.Fatalf("burst retry waited %v; Retry-After must be ignored", d)
+	}
+	// Daily caps report out instead of sleeping out the daily reset.
+	for _, kind := range []string{"user_limit_exceeded", "app_limit_exceeded"} {
+		srvD := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "45000")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(429)
+			fmt.Fprintf(w, `{"error":%q}`, kind)
+		}))
+		start := time.Now()
+		_, err := doWithRetry(ctx, srvD.Client(), func() (*http.Request, error) {
+			return http.NewRequestWithContext(ctx, "GET", srvD.URL+"/x", nil)
+		})
+		srvD.Close()
+		if err == nil || !strings.Contains(err.Error(), "daily limit") {
+			t.Fatalf("%s: err=%v want daily-limit error", kind, err)
+		}
+		if d := time.Since(start); d > 900*time.Millisecond {
+			t.Fatalf("%s: waited %v; daily caps must return promptly", kind, d)
+		}
+	}
+	// Second build fails after a burst 429.
 	calls := 0
 	srv3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "0")
@@ -160,7 +188,7 @@ func TestDoWithRetryEdges(t *testing.T) {
 	}); err != buildErr {
 		t.Fatalf("second build err: %v calls=%d", err, calls)
 	}
-	// Cancel during the Retry-After sleep aborts.
+	// Cancel during the retry sleep aborts.
 	srv4 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "5")
 		w.WriteHeader(429)
@@ -245,12 +273,15 @@ func TestFetchCategoryEdges(t *testing.T) {
 			t.Fatalf("%v must fail", tt)
 		}
 	}
-	// last_watched_at drives movies + since filter; watching bucket empty.
+	// Movies fetch one bucket; date_from is sent and old entries the server
+	// still returns pass through (over-delivery is accepted).
 	since := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/watching") {
-			fmt.Fprint(w, `{"movies":[]}`)
-			return
+		if !strings.HasSuffix(r.URL.Path, "/completed") {
+			t.Errorf("movies use only the completed bucket, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("date_from") == "" {
+			t.Error("missing date_from")
 		}
 		fmt.Fprint(w, `{"movies":[
 			{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"Fallback","year":2007,"ids":{"simkl":1}}},
@@ -262,8 +293,8 @@ func TestFetchCategoryEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Title != "Fallback" {
-		t.Fatalf("got=%+v", got)
+	if len(got) != 2 || got[0].Title != "Fallback" || got[1].Title != "Old" {
+		t.Fatalf("got=%+v want Fallback + over-delivered Old", got)
 	}
 	if got[0].WatchedAt.Day() != 15 {
 		t.Fatalf("last_watched not used: %+v", got[0])
@@ -289,18 +320,17 @@ func TestFetchCategoryEdges(t *testing.T) {
 	if _, err := New(srv3.URL, "c", "t").fetchCategory(ctx, "shows", time.Time{}); err == nil {
 		t.Fatal("malformed shows must fail")
 	}
-	// Old episodes are filtered by since.
+	// Old episodes still emit when the server over-delivers past date_from.
 	srv4 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/watching") {
-			fmt.Fprint(w, `{"shows":[]}`)
-			return
+		if r.URL.Query().Get("date_from") == "" {
+			t.Error("missing date_from")
 		}
 		fmt.Fprint(w, `{"shows":[{"status":"completed","last_watched_at":"2020-01-01T00:00:00Z","show":{"title":"S","ids":{"simkl":9}},"seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2020-01-01T00:00:00Z"}]}]}]}`)
 	}))
 	defer srv4.Close()
 	got, err = New(srv4.URL, "c", "t").fetchCategory(ctx, "shows", since)
-	if err != nil || len(got) != 0 {
-		t.Fatalf("old episodes must filter: got=%v err=%v", got, err)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("over-delivered old episode must pass through: got=%v err=%v", got, err)
 	}
 }
 
@@ -497,7 +527,8 @@ func TestFetchDedupesAcrossBuckets(t *testing.T) {
 	if got[0].Season != 1 || got[0].Episode != 1 || got[0].IDs.Simkl != 1411674 || got[0].WatchedAt.IsZero() {
 		t.Fatalf("got=%+v", got[0])
 	}
-	// Same movie in both buckets emits once (covers the movies dedupe branch).
+	// Movies emit straight from the single completed bucket (no cross-bucket
+	// duplicates possible); shows dedupe the same episode in both buckets.
 	mov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"movies":[{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"M","year":2007,"ids":{"simkl":1015859}}}]}`)
 	}))
@@ -541,8 +572,8 @@ func TestHistorySkipsUnchangedTVShows(t *testing.T) {
 	if showsHits != 0 {
 		t.Fatalf("showsHits=%d want 0 (tv_shows unchanged)", showsHits)
 	}
-	if moviesHits != 2 {
-		t.Fatalf("moviesHits=%d want 2 (completed+watching)", moviesHits)
+	if moviesHits != 1 {
+		t.Fatalf("moviesHits=%d want 1 (completed bucket only)", moviesHits)
 	}
 }
 
@@ -647,6 +678,64 @@ func TestFetchCategoryShowMovieFallback(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Title != "Fallback" || got[0].IDs.Simkl != 99 {
 		t.Fatalf("got=%+v want Fallback movie fallback", got)
+	}
+}
+
+// TestFlexIntIDs verifies quoted, numeric, null, and garbage external ids
+// decode (responses quote tmdb/tvdb; only simkl stays numeric), and that a
+// full all-items body with string ids maps intact.
+func TestFlexIntIDs(t *testing.T) {
+	var ids simklIDs
+	if err := json.Unmarshal([]byte(`{"simkl":5,"tmdb":"693134","tvdb":"290272","imdb":"tt1201607"}`), &ids); err != nil {
+		t.Fatal(err)
+	}
+	if ids.TMDB != 693134 || ids.TVDB != 290272 {
+		t.Fatalf("ids=%+v want quoted strings decoded", ids)
+	}
+	for _, in := range []string{`{"tmdb":""}`, `{"tmdb":null}`, `{"tmdb":"abc"}`, `{"other":1}`} {
+		var zero simklIDs
+		if err := json.Unmarshal([]byte(in), &zero); err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		if zero.TMDB != 0 {
+			t.Fatalf("%s: tmdb=%d want 0", in, zero.TMDB)
+		}
+	}
+	var num simklIDs
+	if err := json.Unmarshal([]byte(`{"tmdb":603,"tvdb":275274}`), &num); err != nil {
+		t.Fatal(err)
+	}
+	if num.TMDB != 603 || num.TVDB != 275274 {
+		t.Fatalf("num=%+v", num)
+	}
+	// End to end: a real all-items body quotes tmdb/tvdb.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"movies":[{"status":"completed","last_watched_at":"2026-05-15T22:30:00Z","movie":{"title":"M","ids":{"simkl":1015859,"tmdb":"27205","tvdb":"3436"}}}]}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "c", "t").fetchCategory(context.Background(), "movies", time.Time{})
+	if err != nil || len(got) != 1 || got[0].IDs.TMDB != 27205 || got[0].IDs.TVDB != 3436 {
+		t.Fatalf("got=%v err=%v want string ids decoded", got, err)
+	}
+}
+
+// TestPushEncodesIntIDs verifies request ids stay plain integers on push.
+func TestPushEncodesIntIDs(t *testing.T) {
+	var got struct {
+		Movies []map[string]any `json:"movies"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+	items := []model.WatchItem{{IDs: model.IDs{Simkl: 1015859, TMDB: 27205}, MediaType: "movie", WatchedAt: time.Now()}}
+	if _, err := New(srv.URL, "c", "t").Push(context.Background(), items); err != nil {
+		t.Fatal(err)
+	}
+	mids, ok := got.Movies[0]["ids"].(map[string]any)
+	if !ok || mids["tmdb"].(float64) != 27205 || mids["simkl"].(float64) != 1015859 {
+		t.Fatalf("ids=%v want numeric tmdb", mids)
 	}
 }
 
